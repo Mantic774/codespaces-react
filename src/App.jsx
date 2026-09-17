@@ -318,6 +318,45 @@ function InviteModal({ server, onClose, onInvite }) {
   </div></div>;
 }
 
+function JoinServerModal({ onClose, onJoin }) {
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(e) {
+    e.preventDefault();
+    const value = code.trim();
+    if (!value) return setError("Enter a server invite code.");
+    setBusy(true);
+    setError("");
+    const ok = await onJoin(value);
+    setBusy(false);
+    if (!ok) setError("That invite code is invalid or could not be used.");
+  }
+
+  return <div className="modal-bg">
+    <form className="modal join-server-modal" onSubmit={submit}>
+      <button className="close" type="button" onClick={onClose}>×</button>
+      <div className="tutorial-icon">🔑</div>
+      <h2>Join a Server</h2>
+      <p className="muted">Enter the server invite code someone gave you.</p>
+      <label>Server invite code</label>
+      <input
+        autoFocus
+        value={code}
+        onChange={e => setCode(e.target.value)}
+        placeholder="Example: A1B2C3D4"
+        maxLength={64}
+        autoComplete="off"
+      />
+      {error && <div className="form-error">{error}</div>}
+      <button className="primary" type="submit" disabled={busy}>
+        {busy ? "Joining…" : "Join Server"}
+      </button>
+    </form>
+  </div>;
+}
+
 function Voice({ channel, me, profiles, onLeave }) {
   const [members, setMembers] = useState([]);
   const [joined, setJoined] = useState(false);
@@ -609,6 +648,7 @@ function App() {
   const [serverRoleMembers, setServerRoleMembers] = useState([]);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
@@ -955,6 +995,29 @@ function App() {
     }
   }
 
+  async function joinServerByCode(code) {
+    const cleanCode = String(code || "").trim();
+    if (!cleanCode) return false;
+    const { data, error } = await supabase.rpc("join_server_by_invite", { p_invite_code: cleanCode });
+    if (error) {
+      notify(error.message || "That invite code is invalid or could not be used.");
+      return false;
+    }
+    const joinedServer = Array.isArray(data) ? data[0] : data;
+    if (!joinedServer?.id) {
+      notify("That invite code is invalid or could not be used.");
+      return false;
+    }
+    setServers(current => current.some(s => s.id === joinedServer.id)
+      ? current.map(s => s.id === joinedServer.id ? { ...s, ...joinedServer } : s)
+      : [...current, joinedServer].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+    setJoinOpen(false);
+    setMobileMenu(false);
+    notify(`Joined ${joinedServer.name}.`);
+    await openServer(joinedServer.id);
+    return true;
+  }
+
   async function createServer() {
     const name = prompt("Server name");
     if (!name?.trim()) return;
@@ -1206,6 +1269,7 @@ function App() {
       <div className="divider" />
       {servers.map(s => <button key={s.id} className={serverId === s.id ? "rail-btn active" : "rail-btn"} title={s.name} onClick={() => { openServer(s.id); setMobileMenu(false); }}>{s.icon_url ? <img src={s.icon_url} alt="" /> : s.name.slice(0, 1).toUpperCase()}</button>)}
       <button className="rail-btn add" onClick={createServer}>+</button>
+      <button className="rail-btn" title="Join a Server" onClick={() => setJoinOpen(true)}>🔑</button>
       <div className="spacer" />
       {canUseAdminPanel && <button className="rail-btn" title="Vexel Admin Panel" onClick={() => setAdminOpen(true)}>🛡️</button>}
       <button className="rail-btn tutorial-btn" title="Vexel Tutorial" onClick={() => setTutorialOpen(true)}>?</button>
@@ -1220,6 +1284,7 @@ function App() {
 
       {page === "home" ? <>
         <div className="side-section">DIRECT MESSAGES</div>
+        <button className="side-add" onClick={() => setJoinOpen(true)}>🔑 Join a Server</button>
         {visibleProfiles.map(u => <button className={dmUserId === u.id ? "user-row selected" : "user-row"} key={u.id} onClick={() => openDm(u)}>
           <Avatar user={u} small /><span><b>{u.display_name}</b><small>@{u.username}</small></span><i className={u.status === "Online" ? "online" : ""} />
         </button>)}
@@ -1274,6 +1339,7 @@ function App() {
     {rolesOpen && selectedServer && <ServerRolesModal server={selectedServer} members={serverMembers} profiles={profiles} roles={serverRoles} roleMembers={serverRoleMembers} canManage={hasServerPermission("manage_roles")} onClose={() => setRolesOpen(false)} onCreateRole={createServerRole} onUpdateRole={updateServerRole} onDeleteRole={deleteServerRole} onAssignRole={assignServerRole} onRemoveRole={removeServerRole} />}
     {addOpen && <AddPeople users={availableProfiles} onClose={() => setAddOpen(false)} onPick={u => { setAddOpen(false); openDm(u); }} />}
     {inviteOpen && selectedServer && <InviteModal server={selectedServer} onClose={() => setInviteOpen(false)} onInvite={copyServerInvite} />}
+    {joinOpen && <JoinServerModal onClose={() => setJoinOpen(false)} onJoin={joinServerByCode} />}
     {tutorialOpen && <TutorialModal onClose={() => setTutorialOpen(false)} />}
     {notice && <div className="toast">🔔 {notice}</div>}
 
@@ -1626,7 +1692,8 @@ const CSS = `
 @media (prefers-reduced-motion:reduce){
   .sidebar{transition:none}
 }
-.auth-methods{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:18px}.secondary{padding:11px 14px;border-radius:10px;background:#26364e;color:#dce7f8;font-weight:800}.terms-bg{z-index:70}.terms-modal{width:min(760px,96vw);max-height:94vh}.terms-brand{display:flex;align-items:center;gap:14px;margin-bottom:12px}.terms-brand .logo{width:58px;height:58px;font-size:30px}.terms-brand small{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.4px}.terms-brand h1{margin:3px 0 0}.terms-intro{color:#9aa9bf;line-height:1.55}.terms-scroll{max-height:48vh;overflow:auto;padding:4px 4px 4px 0;margin:14px 0;border-top:1px solid #26354c;border-bottom:1px solid #26354c}.terms-scroll section{padding:11px 0;border-bottom:1px solid #202e43}.terms-scroll section:last-child{border-bottom:0}.terms-scroll h3{margin:0 0 5px;font-size:14px}.terms-scroll p{margin:0;color:#9aa9bf;font-size:12px;line-height:1.55}.terms-check{display:flex;align-items:flex-start;gap:10px;color:#dbe5f4;font-size:13px;line-height:1.45;cursor:pointer}.terms-check input{width:auto;min-width:18px;margin-top:2px}.terms-accept{width:100%;margin-top:14px}`;
+.auth-methods{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:18px}.secondary{padding:11px 14px;border-radius:10px;background:#26364e;color:#dce7f8;font-weight:800}.terms-bg{z-index:70}.terms-modal{width:min(760px,96vw);max-height:94vh}.terms-brand{display:flex;align-items:center;gap:14px;margin-bottom:12px}.terms-brand .logo{width:58px;height:58px;font-size:30px}.terms-brand small{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.4px}.terms-brand h1{margin:3px 0 0}.terms-intro{color:#9aa9bf;line-height:1.55}.terms-scroll{max-height:48vh;overflow:auto;padding:4px 4px 4px 0;margin:14px 0;border-top:1px solid #26354c;border-bottom:1px solid #26354c}.terms-scroll section{padding:11px 0;border-bottom:1px solid #202e43}.terms-scroll section:last-child{border-bottom:0}.terms-scroll h3{margin:0 0 5px;font-size:14px}.terms-scroll p{margin:0;color:#9aa9bf;font-size:12px;line-height:1.55}.terms-check{display:flex;align-items:flex-start;gap:10px;color:#dbe5f4;font-size:13px;line-height:1.45;cursor:pointer}.terms-check input{width:auto;min-width:18px;margin-top:2px}.terms-accept{width:100%;margin-top:14px}.join-server-modal{max-width:440px}.join-server-modal input{width:100%;box-sizing:border-box;margin:8px 0 12px}.join-server-modal .primary{width:100%;margin-top:10px}.join-server-modal .form-error{color:#ff8f8f;background:#3a1f27;border:1px solid #6a2d3a;padding:8px 10px;border-radius:8px;margin-bottom:10px}.join-server-modal .muted{margin:0 0 14px}
+  `;
 
 class VexelErrorBoundary extends React.Component {
   constructor(props) {
@@ -1658,3 +1725,4 @@ class VexelErrorBoundary extends React.Component {
 export default function VexelApp() {
   return <VexelErrorBoundary><App /></VexelErrorBoundary>;
 }
+
