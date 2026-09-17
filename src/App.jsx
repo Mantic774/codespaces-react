@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+
 import { createClient } from "@supabase/supabase-js";
 import "./App.css";
 
@@ -190,7 +190,8 @@ function AddPeople({ users, onPick, onClose }) {
 function InviteModal({ server, onClose, onInvite }) {
   const [copied, setCopied] = useState(false);
   const inviteCode = server?.invite_code || "";
-  const inviteLink = inviteCode ? `${window.location.origin}/?invite=${encodeURIComponent(inviteCode)}` : "";
+  const publicOrigin = (import.meta.env.VITE_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, "");
+  const inviteLink = inviteCode ? `${publicOrigin}/?invite=${encodeURIComponent(inviteCode)}` : "";
 
   async function copyLink() {
     if (!inviteLink) return;
@@ -451,10 +452,40 @@ function ServerRolesModal({ server, members, profiles, roles, roleMembers, canMa
   </div></div>;
 }
 
+
+function TutorialModal({ onClose }) {
+  const [step, setStep] = useState(0);
+  const steps = [
+    { title: "Welcome to Vexel", text: "Vexel is your place for private messages, servers, voice channels, and your profile." },
+    { title: "Home & DMs", text: "Press the V button to open Home. Use Add People to search for someone by their Vexel @username and start a private DM." },
+    { title: "Servers", text: "Click a server icon to enter that server. Server channels stay inside that server, while private DMs stay on Home." },
+    { title: "Invites", text: "Inside a server, press Invite People, copy the invite link, and send it to someone. After they sign in, the invite can open the server for them." },
+    { title: "Profile & Exit", text: "Use the profile button to edit your profile. Use Exit when you want to sign out of Vexel." }
+  ];
+  const current = steps[step];
+  return <div className="modal-bg">
+    <div className="modal tutorial-modal">
+      <button className="close" type="button" onClick={onClose}>×</button>
+      <div className="tutorial-icon">V</div>
+      <div className="tutorial-progress">STEP {step + 1} OF {steps.length}</div>
+      <h2>{current.title}</h2>
+      <p className="tutorial-text">{current.text}</p>
+      <div className="tutorial-dots">{steps.map((_, i) => <button key={i} type="button" className={i === step ? "tutorial-dot active" : "tutorial-dot"} aria-label={`Go to step ${i + 1}`} onClick={() => setStep(i)} />)}</div>
+      <div className="tutorial-actions">
+        <button type="button" onClick={() => setStep(s => Math.max(0, s - 1))} disabled={step === 0}>Back</button>
+        {step < steps.length - 1
+          ? <button type="button" className="primary" onClick={() => setStep(s => Math.min(steps.length - 1, s + 1))}>Next</button>
+          : <button type="button" className="primary" onClick={onClose}>Finish</button>}
+      </div>
+    </div>
+  </div>;
+}
+
 function App() {
   const [session, setSession] = useState(null);
   const [me, setMe] = useState(null);
   const [profiles, setProfiles] = useState([]);
+  const [dmProfiles, setDmProfiles] = useState([]);
   const [servers, setServers] = useState([]);
   const [channels, setChannels] = useState([]);
   const [serverMembers, setServerMembers] = useState([]);
@@ -478,6 +509,7 @@ function App() {
   const [serverRoleMembers, setServerRoleMembers] = useState([]);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const inviteProcessedRef = useRef(null);
 
   const [page, setPage] = useState("home");
@@ -589,11 +621,21 @@ function App() {
 
   async function loadAll() {
     if (!session?.user) return;
-    const [{ data: ps }, { data: ss }] = await Promise.all([
+    const [{ data: ps }, { data: ss }, { data: dmRows }] = await Promise.all([
       supabase.from("profiles").select("*").order("display_name"),
-      supabase.from("servers").select("*").order("created_at")
+      supabase.from("servers").select("*").order("created_at"),
+      supabase.from("dm_members").select("conversation_id,user_id")
     ]);
-    setProfiles(ps || []);
+    const allProfiles = ps || [];
+    setProfiles(allProfiles);
+
+    // Only people who are already in a private conversation with this user
+    // belong in the Home/DM list. Do not treat every Vexel account as a DM.
+    const dmRowsSafe = dmRows || [];
+    const myConversationIds = new Set(dmRowsSafe.filter(row => row.user_id === session.user.id).map(row => row.conversation_id));
+    const dmUserIds = new Set(dmRowsSafe.filter(row => myConversationIds.has(row.conversation_id) && row.user_id !== session.user.id).map(row => row.user_id));
+    setDmProfiles(allProfiles.filter(p => dmUserIds.has(p.id)));
+
     const membershipsResult = await supabase.from("server_members").select("server_id").eq("user_id", session.user.id);
     const memberships = membershipsResult.data || [];
     const allowed = new Set(memberships.map(x => x.server_id));
@@ -660,6 +702,7 @@ function App() {
     // Setting the conversation id automatically loads the DM messages in the
     // effect below. This keeps the DM view in sync without another click.
     setDmConversationId(conversationId);
+    setDmProfiles(current => current.some(p => p.id === user.id) ? current : [...current, user].sort((a, b) => a.display_name.localeCompare(b.display_name)));
   }
 
   async function send() {
@@ -828,6 +871,10 @@ function App() {
     const { error: memberError } = await supabase.from("server_members").insert({ server_id: data.id, user_id: me.id });
     if (memberError) notify(memberError.message);
     await supabase.from("server_roles").insert({ server_id: data.id, name: "Member", color: "#5b8cff", permissions: DEFAULT_SERVER_PERMISSIONS, position: 1 });
+    await supabase.from("channels").insert([
+      { server_id: data.id, name: "general", type: "text" },
+      { server_id: data.id, name: "General Voice", type: "voice" }
+    ]);
     await loadAll();
     openServer(data.id);
   }
@@ -1001,10 +1048,13 @@ function App() {
   if (loading) return <div className="loading">Loading Vexel...</div>;
   if (!session || !me) return <Auth onDone={() => {}} />;
 
-  const visibleProfiles = profiles.filter(p => p.id !== me.id);
+  const visibleProfiles = dmProfiles.filter(p => p.id !== me.id);
+  const availableProfiles = profiles.filter(p => p.id !== me.id);
   const serverChannels = channels.filter(c => c.server_id === serverId);
 
   const adminStyles = `
+
+    .tutorial-modal{width:min(560px,96vw);text-align:center}.tutorial-icon{width:64px;height:64px;margin:0 auto 10px;display:grid;place-items:center;border-radius:18px;background:linear-gradient(135deg,#4d86ff,#263ed0);font-size:32px;font-weight:900}.tutorial-progress{font-size:11px;font-weight:900;letter-spacing:1.2px;color:#718098}.tutorial-text{color:#aab8cc;line-height:1.65;min-height:78px}.tutorial-dots{display:flex;justify-content:center;gap:7px;margin:18px 0}.tutorial-dot{width:10px;height:10px;min-height:10px;padding:0;border-radius:50%;background:#33445f}.tutorial-dot.active{background:#5b8cff}.tutorial-actions{display:flex;justify-content:center;gap:8px}.exit-btn{font-size:12px;font-weight:900}.tutorial-btn{font-size:22px}
     .admin-panel{position:fixed;inset:0;background:rgba(4,8,14,.82);backdrop-filter:blur(8px);z-index:60;display:flex;justify-content:center;align-items:center;padding:18px}
     .admin-window{width:min(1100px,96vw);height:min(760px,92vh);background:#111b29;border:1px solid #334865;border-radius:20px;display:flex;overflow:hidden;box-shadow:0 30px 100px #000b}
     .admin-nav{width:220px;min-width:220px;background:#0c1420;border-right:1px solid #263850;padding:16px;display:flex;flex-direction:column;gap:7px}
@@ -1050,8 +1100,9 @@ function App() {
       <button className="rail-btn add" onClick={createServer}>+</button>
       <div className="spacer" />
       {canUseAdminPanel && <button className="rail-btn" title="Vexel Admin Panel" onClick={() => setAdminOpen(true)}>🛡️</button>}
+      <button className="rail-btn tutorial-btn" title="Vexel Tutorial" onClick={() => setTutorialOpen(true)}>?</button>
       <button className="rail-btn" onClick={() => setProfileOpen(me)}>👤</button>
-      <button className="rail-btn" onClick={() => supabase.auth.signOut()}>↪</button>
+      <button className="rail-btn exit-btn" title="Exit Vexel" onClick={() => supabase.auth.signOut()}>Exit</button>
     </aside>
 
     <aside className={`sidebar ${mobileMenu ? "mobile-open" : ""}`}>
@@ -1113,8 +1164,9 @@ function App() {
 
     {profileOpen && <ProfileModal user={profileOpen} isSelf={profileOpen.id === me.id} onClose={() => setProfileOpen(null)} onSave={updateMe} onUploadAvatar={uploadAvatar} uploadingAvatar={uploadingAvatar} />}
     {rolesOpen && selectedServer && <ServerRolesModal server={selectedServer} members={serverMembers} profiles={profiles} roles={serverRoles} roleMembers={serverRoleMembers} canManage={hasServerPermission("manage_roles")} onClose={() => setRolesOpen(false)} onCreateRole={createServerRole} onUpdateRole={updateServerRole} onDeleteRole={deleteServerRole} onAssignRole={assignServerRole} onRemoveRole={removeServerRole} />}
-    {addOpen && <AddPeople users={visibleProfiles} onClose={() => setAddOpen(false)} onPick={u => { setAddOpen(false); openDm(u); }} />}
+    {addOpen && <AddPeople users={availableProfiles} onClose={() => setAddOpen(false)} onPick={u => { setAddOpen(false); openDm(u); }} />}
     {inviteOpen && selectedServer && <InviteModal server={selectedServer} onClose={() => setInviteOpen(false)} onInvite={copyServerInvite} />}
+    {tutorialOpen && <TutorialModal onClose={() => setTutorialOpen(false)} />}
     {notice && <div className="toast">🔔 {notice}</div>}
 
     {adminOpen && canUseAdminPanel && <div className="admin-panel">
