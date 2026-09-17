@@ -187,6 +187,36 @@ function AddPeople({ users, onPick, onClose }) {
   </div></div>;
 }
 
+function InviteModal({ server, onClose, onInvite }) {
+  const [copied, setCopied] = useState(false);
+  const inviteCode = server?.invite_code || "";
+  const inviteLink = inviteCode ? `${window.location.origin}/?invite=${encodeURIComponent(inviteCode)}` : "";
+
+  async function copyLink() {
+    if (!inviteLink) return;
+    const ok = await onInvite(inviteLink);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2200);
+    }
+  }
+
+  return <div className="modal-bg"><div className="modal invite-modal">
+    <button className="close" onClick={onClose}>×</button>
+    <div className="profile-top">
+      <Avatar user={{ display_name: server?.name, avatar_url: server?.icon_url }} />
+      <div><h2>Invite People</h2><span>Invite someone to {server?.name}</span></div>
+    </div>
+    <p className="invite-note">Anyone with this link can join this server after signing in or creating a Vexel account.</p>
+    <label>Server invite link</label>
+    <div className="invite-link-row">
+      <input value={inviteLink} readOnly onFocus={e => e.target.select()} />
+      <button className="primary" type="button" onClick={copyLink}>{copied ? "✓ Copied" : "Copy"}</button>
+    </div>
+    <div className="invite-code">Invite code: <b>{inviteCode || "Unavailable"}</b></div>
+  </div></div>;
+}
+
 function Voice({ channel, me, profiles, onLeave }) {
   const [members, setMembers] = useState([]);
   const [joined, setJoined] = useState(false);
@@ -447,6 +477,8 @@ function App() {
   const [serverRoles, setServerRoles] = useState([]);
   const [serverRoleMembers, setServerRoleMembers] = useState([]);
   const [rolesOpen, setRolesOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const inviteProcessedRef = useRef(null);
 
   const [page, setPage] = useState("home");
   const [serverId, setServerId] = useState(null);
@@ -599,27 +631,35 @@ function App() {
   }
 
   async function openDm(user) {
-    setPage("home"); setDmUserId(user.id); setServerId(null); setChannelId(null);
-    const { data: mine } = await supabase.from("dm_members").select("conversation_id").eq("user_id", session.user.id);
-    const ids = (mine || []).map(x => x.conversation_id);
-    let conversation = null;
-    if (ids.length) {
-      const { data: other } = await supabase.from("dm_members").select("conversation_id").eq("user_id", user.id).in("conversation_id", ids);
-      if (other?.[0]) conversation = other[0].conversation_id;
+    if (!user?.id || !session?.user?.id) return;
+
+    setPage("home");
+    setDmUserId(user.id);
+    setServerId(null);
+    setChannelId(null);
+    setVoiceOpen(false);
+    setMobileMenu(false);
+
+    // DM conversations are created through a SECURITY DEFINER RPC.
+    // This keeps the database RLS protection in place while allowing the
+    // signed-in user to safely create a private conversation with another user.
+    const { data: conversationId, error } = await supabase.rpc("create_dm_conversation", {
+      p_other_user: user.id
+    });
+
+    if (error) {
+      notify("Could not open DM", error.message, "⚠️");
+      return;
     }
-    if (!conversation) {
-      const { data: created, error } = await supabase.from("dm_conversations").insert({ created_by: session.user.id }).select().single();
-      if (error) { notify(error.message); return; }
-      conversation = created.id;
-      const { error: memberError } = await supabase.from("dm_members").insert([
-        { conversation_id: conversation, user_id: session.user.id },
-        { conversation_id: conversation, user_id: user.id }
-      ]);
-      if (memberError) { notify(memberError.message); return; }
+
+    if (!conversationId) {
+      notify("Could not open DM. No conversation was created.", "", "⚠️");
+      return;
     }
+
     // Setting the conversation id automatically loads the DM messages in the
     // effect below. This keeps the DM view in sync without another click.
-    setDmConversationId(conversation);
+    setDmConversationId(conversationId);
   }
 
   async function send() {
@@ -751,6 +791,29 @@ function App() {
     }
   }
 
+  async function copyServerInvite(link) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        const area = document.createElement("textarea");
+        area.value = link;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.focus();
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+      notify("Invite link copied. Send it to anyone you want to invite.");
+      return true;
+    } catch (e) {
+      notify("Could not copy automatically. Select the invite link and copy it manually.");
+      return false;
+    }
+  }
+
   async function createServer() {
     const name = prompt("Server name");
     if (!name?.trim()) return;
@@ -847,6 +910,31 @@ function App() {
     });
     return () => { mounted = false; listener.subscription.unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    if (!session?.user || !me) return;
+    const params = new URLSearchParams(window.location.search);
+    const inviteCode = params.get("invite")?.trim();
+    if (!inviteCode || inviteProcessedRef.current === inviteCode) return;
+
+    inviteProcessedRef.current = inviteCode;
+    (async () => {
+      const { data, error } = await supabase.rpc("join_server_by_invite", { p_invite_code: inviteCode });
+      const joinedServer = Array.isArray(data) ? data[0] : data;
+      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+
+      if (error || !joinedServer?.id) {
+        notify(error?.message || "That invite is invalid or no longer exists.");
+        return;
+      }
+
+      setServers(current => current.some(s => s.id === joinedServer.id)
+        ? current.map(s => s.id === joinedServer.id ? joinedServer : s)
+        : [...current, joinedServer].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
+      notify(`Joined ${joinedServer.name}. Opening the server...`);
+      await openServer(joinedServer.id);
+    })();
+  }, [session?.user?.id, me?.id]);
 
   useEffect(() => {
     if (!session?.user || !me) return;
@@ -979,6 +1067,7 @@ function App() {
         {!visibleProfiles.length && <p className="muted">Use ＋ to add/search people.</p>}
       </> : <>
         <div className="server-about">{selectedServer?.description || "Server"}</div>
+        {selectedServer?.invite_code && <button className="side-add invite-server-btn" onClick={() => setInviteOpen(true)}>🔗 Invite People</button>}
         <div className="side-section">TEXT CHANNELS</div>
         {serverChannels.filter(c => c.type === "text").map(c => <div className="channel-line" key={c.id}>
           <button className={channelId === c.id ? "channel selected" : "channel"} onClick={() => openChannel(c.id)}># {c.name}</button>
@@ -1025,6 +1114,7 @@ function App() {
     {profileOpen && <ProfileModal user={profileOpen} isSelf={profileOpen.id === me.id} onClose={() => setProfileOpen(null)} onSave={updateMe} onUploadAvatar={uploadAvatar} uploadingAvatar={uploadingAvatar} />}
     {rolesOpen && selectedServer && <ServerRolesModal server={selectedServer} members={serverMembers} profiles={profiles} roles={serverRoles} roleMembers={serverRoleMembers} canManage={hasServerPermission("manage_roles")} onClose={() => setRolesOpen(false)} onCreateRole={createServerRole} onUpdateRole={updateServerRole} onDeleteRole={deleteServerRole} onAssignRole={assignServerRole} onRemoveRole={removeServerRole} />}
     {addOpen && <AddPeople users={visibleProfiles} onClose={() => setAddOpen(false)} onPick={u => { setAddOpen(false); openDm(u); }} />}
+    {inviteOpen && selectedServer && <InviteModal server={selectedServer} onClose={() => setInviteOpen(false)} onInvite={copyServerInvite} />}
     {notice && <div className="toast">🔔 {notice}</div>}
 
     {adminOpen && canUseAdminPanel && <div className="admin-panel">
@@ -1218,7 +1308,7 @@ function PrivateCall({ user, onClose }) {
 }
 
 const CSS = `
-*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Inter,system-ui,sans-serif;background:#0b111b;color:#eef4ff}button,input,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit}input,textarea{width:100%;background:#111a29;border:1px solid #2d3b52;color:white;border-radius:10px;padding:12px}textarea{min-height:90px;resize:vertical}label{font-size:12px;font-weight:800;color:#9aa9bf}.app{display:flex;width:100%;height:100%;overflow:hidden;background:#101722}.loading,.auth{height:100%;display:grid;place-items:center;background:radial-gradient(circle at top,#243c66,#0a0f17)}.auth-card{width:min(430px,94vw);padding:32px;background:#151f2e;border:1px solid #30425e;border-radius:22px;box-shadow:0 30px 90px #0008}.logo,.big-logo{width:68px;height:68px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#4d86ff,#263ed0);font-size:36px;font-weight:900}.auth h1{margin:15px 0 5px;font-size:32px}.auth p,.muted{color:#8291a8}.auth form{display:grid;gap:9px;margin-top:22px}.primary,.danger,.controls button,.header button,.composer button{padding:11px 14px;border-radius:10px;background:#4d82ff;color:white;font-weight:800}.danger{background:#b93647}.link{background:transparent;color:#77a1ff;width:100%;margin-top:15px}.error{padding:10px;border-radius:9px;background:#47222b;color:#ffb4bf;font-size:13px}.rail{width:76px;min-width:76px;background:#0a1018;border-right:1px solid #202d40;display:flex;flex-direction:column;align-items:center;gap:9px;padding:10px}.rail-btn{width:52px;height:52px;border-radius:16px;background:#182334;font-weight:900;font-size:18px;display:grid;place-items:center;overflow:hidden}.rail-btn img{width:100%;height:100%;object-fit:cover}.rail-btn.active{background:#315ecf;box-shadow:0 0 0 2px #6e9bff}.rail-btn.add{color:#7da7ff;font-size:27px}.divider{height:1px;width:34px;background:#29384e}.spacer{flex:1}.sidebar{width:270px;min-width:270px;background:#151e2c;border-right:1px solid #26354c;overflow:auto}.side-head{height:72px;padding:14px 16px;border-bottom:1px solid #26354c;display:flex;justify-content:space-between;align-items:center}.side-head small,.side-section{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.2px}.side-head h3{margin:2px 0 0}.side-head button,.side-add{background:transparent;color:#86a9ff;padding:10px}.side-section{padding:15px 13px 6px}.user-row,.channel{width:100%;display:flex;align-items:center;gap:9px;background:transparent;padding:9px 11px;text-align:left;border-radius:8px}.user-row:hover,.channel:hover,.selected{background:#22304a}.user-row span{display:flex;flex-direction:column;min-width:0}.user-row small{color:#78869d}.online{margin-left:auto;width:8px;height:8px;border-radius:50%;background:#45d77b}.server-about{padding:14px;color:#8795aa;font-size:12px}.main{flex:1;min-width:0;display:flex;flex-direction:column;background:#101722}.header{min-height:68px;padding:10px 18px;border-bottom:1px solid #26354c;background:#131c29;display:flex;align-items:center;justify-content:space-between;gap:10px}.header span{color:#75849b;font-size:12px;margin-left:10px}.header-user{display:flex;align-items:center;gap:8px;cursor:pointer}.messages{flex:1;overflow:auto;padding:18px 22px;scroll-behavior:smooth}.empty-messages{display:grid;place-items:center;min-height:100%;color:#718098;text-align:center;padding:30px}.message{display:flex;gap:10px;padding:8px 0}.message p{margin:3px 0;color:#d4dcea;overflow-wrap:anywhere}.time{color:#68778e;font-size:10px;margin-left:7px}.composer{display:flex;gap:9px;padding:12px 17px;border-top:1px solid #26354c;background:#131c29}.send{width:50px}.empty{flex:1;display:grid;place-items:center;align-content:center;text-align:center;padding:30px}.empty p{color:#7f8da4}.big-logo{margin:auto}.avatar{width:52px;height:52px;border-radius:15px;object-fit:cover;background:linear-gradient(135deg,#435f98,#23334f);display:grid;place-items:center;font-weight:900}.avatar.small{width:36px;height:36px;border-radius:11px;font-size:12px}.modal-bg{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center;padding:20px}.modal{position:relative;width:min(560px,96vw);max-height:92vh;overflow:auto;background:#151f2e;border:1px solid #30425e;border-radius:18px;padding:25px}.close{position:absolute;right:14px;top:12px;background:#26364e;border-radius:8px;width:34px;height:34px;font-size:22px}.modal form{display:grid;gap:9px}.profile-top{display:flex;align-items:center;gap:14px;margin-bottom:20px}.profile-top h2{margin:0}.profile-top span,.profile-read p{color:#8493a9}.badges{display:flex;gap:6px;flex-wrap:wrap}.staff-badge{padding:4px 7px;border:1px solid #3b5276;background:#22314b;border-radius:8px;font-size:11px;color:#eef4ff}.profile-name-block{min-width:0}.profile-username{color:#8493a9;font-size:13px;margin-top:2px}.profile-staff-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.profile-staff-row .staff-badge{cursor:pointer}.header-user-text{display:flex;flex-direction:column;min-width:0}.header-user-text>span{margin-left:0}.results{margin-top:12px}.result{width:100%;display:flex;gap:10px;align-items:center;background:transparent;padding:9px;text-align:left;border-radius:9px}.result:hover{background:#22304a}.result span{display:flex;flex-direction:column}.result small{color:#7b899e}.toast{position:fixed;right:20px;bottom:20px;z-index:50;background:#22314b;border:1px solid #46618b;padding:12px 16px;border-radius:10px}.voice{flex:1;overflow:auto;padding:28px}.voice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}.video-tile{background:#0b111b;border:1px solid #2b3b54;border-radius:14px;overflow:hidden;padding:8px}.video-tile video{width:100%;aspect-ratio:16/9;object-fit:cover;background:#05080d;border-radius:10px}.video-tile b{display:block;padding:7px}.member-list{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.member-list>div{display:flex;align-items:center;gap:7px;background:#182437;padding:7px 9px;border-radius:9px}.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.controls button{background:#26364e}.call-panel{position:fixed;right:20px;bottom:20px;width:min(340px,90vw);background:#172337;border:1px solid #3d5272;padding:18px;border-radius:14px;z-index:30;display:grid;gap:10px}.call-panel span{color:#8d9ab0;font-size:12px}@media(max-width:800px){.rail{width:60px;min-width:60px}.rail-btn{width:44px;height:44px}.sidebar{width:210px;min-width:210px}}@media(max-width:620px){.sidebar{width:185px;min-width:185px}.messages{padding:14px}.voice{padding:18px}}
+*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Inter,system-ui,sans-serif;background:#0b111b;color:#eef4ff}button,input,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit}input,textarea{width:100%;background:#111a29;border:1px solid #2d3b52;color:white;border-radius:10px;padding:12px}textarea{min-height:90px;resize:vertical}label{font-size:12px;font-weight:800;color:#9aa9bf}.app{display:flex;width:100%;height:100%;overflow:hidden;background:#101722}.loading,.auth{height:100%;display:grid;place-items:center;background:radial-gradient(circle at top,#243c66,#0a0f17)}.auth-card{width:min(430px,94vw);padding:32px;background:#151f2e;border:1px solid #30425e;border-radius:22px;box-shadow:0 30px 90px #0008}.logo,.big-logo{width:68px;height:68px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#4d86ff,#263ed0);font-size:36px;font-weight:900}.auth h1{margin:15px 0 5px;font-size:32px}.auth p,.muted{color:#8291a8}.auth form{display:grid;gap:9px;margin-top:22px}.primary,.danger,.controls button,.header button,.composer button{padding:11px 14px;border-radius:10px;background:#4d82ff;color:white;font-weight:800}.danger{background:#b93647}.link{background:transparent;color:#77a1ff;width:100%;margin-top:15px}.error{padding:10px;border-radius:9px;background:#47222b;color:#ffb4bf;font-size:13px}.rail{width:76px;min-width:76px;background:#0a1018;border-right:1px solid #202d40;display:flex;flex-direction:column;align-items:center;gap:9px;padding:10px}.rail-btn{width:52px;height:52px;border-radius:16px;background:#182334;font-weight:900;font-size:18px;display:grid;place-items:center;overflow:hidden}.rail-btn img{width:100%;height:100%;object-fit:cover}.rail-btn.active{background:#315ecf;box-shadow:0 0 0 2px #6e9bff}.rail-btn.add{color:#7da7ff;font-size:27px}.divider{height:1px;width:34px;background:#29384e}.spacer{flex:1}.sidebar{width:270px;min-width:270px;background:#151e2c;border-right:1px solid #26354c;overflow:auto}.side-head{height:72px;padding:14px 16px;border-bottom:1px solid #26354c;display:flex;justify-content:space-between;align-items:center}.side-head small,.side-section{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.2px}.side-head h3{margin:2px 0 0}.side-head button,.side-add{background:transparent;color:#86a9ff;padding:10px}.side-section{padding:15px 13px 6px}.user-row,.channel{width:100%;display:flex;align-items:center;gap:9px;background:transparent;padding:9px 11px;text-align:left;border-radius:8px}.user-row:hover,.channel:hover,.selected{background:#22304a}.user-row span{display:flex;flex-direction:column;min-width:0}.user-row small{color:#78869d}.online{margin-left:auto;width:8px;height:8px;border-radius:50%;background:#45d77b}.server-about{padding:14px;color:#8795aa;font-size:12px}.main{flex:1;min-width:0;display:flex;flex-direction:column;background:#101722}.header{min-height:68px;padding:10px 18px;border-bottom:1px solid #26354c;background:#131c29;display:flex;align-items:center;justify-content:space-between;gap:10px}.header span{color:#75849b;font-size:12px;margin-left:10px}.header-user{display:flex;align-items:center;gap:8px;cursor:pointer}.messages{flex:1;overflow:auto;padding:18px 22px;scroll-behavior:smooth}.empty-messages{display:grid;place-items:center;min-height:100%;color:#718098;text-align:center;padding:30px}.message{display:flex;gap:10px;padding:8px 0}.message p{margin:3px 0;color:#d4dcea;overflow-wrap:anywhere}.time{color:#68778e;font-size:10px;margin-left:7px}.composer{display:flex;gap:9px;padding:12px 17px;border-top:1px solid #26354c;background:#131c29}.send{width:50px}.empty{flex:1;display:grid;place-items:center;align-content:center;text-align:center;padding:30px}.empty p{color:#7f8da4}.big-logo{margin:auto}.avatar{width:52px;height:52px;border-radius:15px;object-fit:cover;background:linear-gradient(135deg,#435f98,#23334f);display:grid;place-items:center;font-weight:900}.avatar.small{width:36px;height:36px;border-radius:11px;font-size:12px}.modal-bg{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center;padding:20px}.modal{position:relative;width:min(560px,96vw);max-height:92vh;overflow:auto;background:#151f2e;border:1px solid #30425e;border-radius:18px;padding:25px}.close{position:absolute;right:14px;top:12px;background:#26364e;border-radius:8px;width:34px;height:34px;font-size:22px}.modal form{display:grid;gap:9px}.profile-top{display:flex;align-items:center;gap:14px;margin-bottom:20px}.profile-top h2{margin:0}.profile-top span,.profile-read p{color:#8493a9}.badges{display:flex;gap:6px;flex-wrap:wrap}.staff-badge{padding:4px 7px;border:1px solid #3b5276;background:#22314b;border-radius:8px;font-size:11px;color:#eef4ff}.profile-name-block{min-width:0}.profile-username{color:#8493a9;font-size:13px;margin-top:2px}.profile-staff-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.profile-staff-row .staff-badge{cursor:pointer}.header-user-text{display:flex;flex-direction:column;min-width:0}.header-user-text>span{margin-left:0}.results{margin-top:12px}.result{width:100%;display:flex;gap:10px;align-items:center;background:transparent;padding:9px;text-align:left;border-radius:9px}.result:hover{background:#22304a}.result span{display:flex;flex-direction:column}.result small{color:#7b899e}.invite-server-btn{width:100%;text-align:left;border-top:1px solid #26354c;border-bottom:1px solid #26354c;margin:2px 0 4px}.invite-note{color:#8b9ab0;font-size:13px;line-height:1.5}.invite-link-row{display:flex;gap:8px;align-items:stretch}.invite-link-row input{min-width:0}.invite-link-row button{white-space:nowrap}.invite-code{margin-top:12px;color:#7f8da4;font-size:12px}.invite-code b{color:#dbe6f7}.invite-modal{width:min(650px,96vw)}.toast{position:fixed;right:20px;bottom:20px;z-index:50;background:#22314b;border:1px solid #46618b;padding:12px 16px;border-radius:10px}.voice{flex:1;overflow:auto;padding:28px}.voice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}.video-tile{background:#0b111b;border:1px solid #2b3b54;border-radius:14px;overflow:hidden;padding:8px}.video-tile video{width:100%;aspect-ratio:16/9;object-fit:cover;background:#05080d;border-radius:10px}.video-tile b{display:block;padding:7px}.member-list{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.member-list>div{display:flex;align-items:center;gap:7px;background:#182437;padding:7px 9px;border-radius:9px}.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.controls button{background:#26364e}.call-panel{position:fixed;right:20px;bottom:20px;width:min(340px,90vw);background:#172337;border:1px solid #3d5272;padding:18px;border-radius:14px;z-index:30;display:grid;gap:10px}.call-panel span{color:#8d9ab0;font-size:12px}@media(max-width:800px){.rail{width:60px;min-width:60px}.rail-btn{width:44px;height:44px}.sidebar{width:210px;min-width:210px}}@media(max-width:620px){.sidebar{width:185px;min-width:185px}.messages{padding:14px}.voice{padding:18px}}
 
 /* CROSS-PLATFORM / MOBILE SUPPORT */
 .mobile-menu-btn{display:none}
