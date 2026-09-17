@@ -67,59 +67,243 @@ function StaffBadgesUnderName({ user, onBadgeClick }) {
 
 function Auth({ onDone }) {
   const [mode, setMode] = useState("login");
+  const [method, setMethod] = useState("email");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+
+  function resetCodeFlow() {
+    setCodeSent(false);
+    setCode("");
+    setError("");
+  }
 
   async function submit(e) {
     e.preventDefault();
-    setBusy(true); setError("");
+    setBusy(true);
+    setError("");
+
     try {
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        onDone();
-      } else {
-        if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) throw new Error("Username must be 3-24 letters, numbers, or underscores.");
-        const { data, error } = await supabase.auth.signUp({
-          email, password,
-          options: { data: { username, display_name: displayName || username } }
+      if (!codeSent) {
+        if (mode === "signup" && !/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
+          throw new Error("Username must be 3-24 letters, numbers, or underscores.");
+        }
+
+        if (method === "email") {
+          const cleanEmail = email.trim().toLowerCase();
+          if (!cleanEmail.includes("@")) {
+            throw new Error("Enter a valid email address.");
+          }
+
+          const { error } = await supabase.auth.signInWithOtp({
+            email: cleanEmail,
+            options: {
+              shouldCreateUser: true,
+              data: mode === "signup"
+                ? {
+                    username: username.trim().toLowerCase(),
+                    display_name: displayName.trim() || username.trim()
+                  }
+                : undefined
+            }
+          });
+
+          if (error) throw error;
+          setEmail(cleanEmail);
+        } else {
+          const cleanPhone = phone.trim();
+          if (!cleanPhone) {
+            throw new Error("Enter your phone number.");
+          }
+
+          const { error } = await supabase.auth.signInWithOtp({
+            phone: cleanPhone,
+            options: {
+              shouldCreateUser: true,
+              data: mode === "signup"
+                ? {
+                    username: username.trim().toLowerCase(),
+                    display_name: displayName.trim() || username.trim()
+                  }
+                : undefined
+            }
+          });
+
+          if (error) throw error;
+          setPhone(cleanPhone);
+        }
+
+        setCodeSent(true);
+        setError(method === "email"
+          ? "A verification code was sent to your email."
+          : "A verification code was sent to your phone.");
+        return;
+      }
+
+      const cleanCode = code.replace(/\D/g, "").slice(0, 6);
+      if (cleanCode.length < 6) {
+        throw new Error("Enter the 6-digit verification code.");
+      }
+
+      if (method === "email") {
+        const { error } = await supabase.auth.verifyOtp({
+          email: email.trim().toLowerCase(),
+          token: cleanCode,
+          type: "email"
         });
         if (error) throw error;
-        if (!data.session) {
-          setError("Check your email to confirm the account, then sign in.");
-        } else onDone();
+      } else {
+        const { error } = await supabase.auth.verifyOtp({
+          phone: phone.trim(),
+          token: cleanCode,
+          type: "sms"
+        });
+        if (error) throw error;
       }
+
+      onDone();
     } catch (err) {
       setError(err.message || "Something went wrong.");
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return <div className="auth">
     <div className="auth-card">
       <div className="logo">V</div>
       <h1>Vexel</h1>
-      <p>Real accounts, servers, DMs, presence, and voice.</p>
+      <p>Sign in or create your Vexel account with a verification code.</p>
+
+      <div className="auth-methods">
+        <button
+          type="button"
+          className={method === "email" ? "primary" : "secondary"}
+          onClick={() => {
+            setMethod("email");
+            resetCodeFlow();
+          }}
+          disabled={busy}
+        >
+          Email
+        </button>
+        <button
+          type="button"
+          className={method === "phone" ? "primary" : "secondary"}
+          onClick={() => {
+            setMethod("phone");
+            resetCodeFlow();
+          }}
+          disabled={busy}
+        >
+          Phone
+        </button>
+      </div>
+
       <form onSubmit={submit}>
-        {mode === "signup" && <>
+        {mode === "signup" && !codeSent && <>
           <label>Vexel @username</label>
-          <input value={username} onChange={e => setUsername(e.target.value.replace(/^@/, ""))} placeholder="@username" required />
+          <input
+            value={username}
+            onChange={e => setUsername(e.target.value.replace(/^@/, ""))}
+            placeholder="@username"
+            maxLength={24}
+            required
+          />
           <label>Display name</label>
-          <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Display name" />
+          <input
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+            placeholder="Display name"
+            maxLength={40}
+          />
         </>}
-        <label>Email</label>
-        <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" required />
-        <label>Password</label>
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={6} required />
+
+        {method === "email" ? (
+          <>
+            <label>Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              disabled={codeSent || busy}
+              required
+            />
+          </>
+        ) : (
+          <>
+            <label>Phone number</label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              placeholder="+1 502 555 0123"
+              disabled={codeSent || busy}
+              required
+            />
+          </>
+        )}
+
+        {codeSent && <>
+          <label>Verification code</label>
+          <input
+            type="text"
+            value={code}
+            onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="Enter your 6-digit code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            required
+            autoFocus
+          />
+        </>}
+
         {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}</button>
+
+        <button className="primary" disabled={busy}>
+          {busy
+            ? "Please wait..."
+            : codeSent
+              ? "Verify Code"
+              : method === "email"
+                ? mode === "login" ? "Send Email Code" : "Create Account"
+                : mode === "login" ? "Send Phone Code" : "Create Account"}
+        </button>
       </form>
-      <button className="link" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }}>
-        {mode === "login" ? "Create a Vexel account" : "I already have an account"}
-      </button>
+
+      {codeSent && (
+        <button
+          type="button"
+          className="link"
+          disabled={busy}
+          onClick={resetCodeFlow}
+        >
+          Use a different email or phone
+        </button>
+      )}
+
+      {!codeSent && (
+        <button
+          type="button"
+          className="link"
+          disabled={busy}
+          onClick={() => {
+            setMode(mode === "login" ? "signup" : "login");
+            setError("");
+            setCode("");
+            setCodeSent(false);
+          }}
+        >
+          {mode === "login" ? "Create a Vexel account" : "I already have an account"}
+        </button>
+      )}
     </div>
   </div>;
 }
@@ -184,36 +368,6 @@ function AddPeople({ users, onPick, onClose }) {
     <h2>Add People</h2><p>Search by Vexel @username.</p>
     <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="@username" />
     <div className="results">{results.map(u => <button className="result" key={u.id} onClick={() => onPick(u)}><Avatar user={u} small /><span><b>{u.display_name}</b><small>@{u.username}</small></span></button>)}</div>
-  </div></div>;
-}
-
-function InviteModal({ server, onClose, onInvite }) {
-  const [copied, setCopied] = useState(false);
-  const inviteCode = server?.invite_code || "";
-  const inviteLink = inviteCode ? `${window.location.origin}/?invite=${encodeURIComponent(inviteCode)}` : "";
-
-  async function copyLink() {
-    if (!inviteLink) return;
-    const ok = await onInvite(inviteLink);
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2200);
-    }
-  }
-
-  return <div className="modal-bg"><div className="modal invite-modal">
-    <button className="close" onClick={onClose}>×</button>
-    <div className="profile-top">
-      <Avatar user={{ display_name: server?.name, avatar_url: server?.icon_url }} />
-      <div><h2>Invite People</h2><span>Invite someone to {server?.name}</span></div>
-    </div>
-    <p className="invite-note">Anyone with this link can join this server after signing in or creating a Vexel account.</p>
-    <label>Server invite link</label>
-    <div className="invite-link-row">
-      <input value={inviteLink} readOnly onFocus={e => e.target.select()} />
-      <button className="primary" type="button" onClick={copyLink}>{copied ? "✓ Copied" : "Copy"}</button>
-    </div>
-    <div className="invite-code">Invite code: <b>{inviteCode || "Unavailable"}</b></div>
   </div></div>;
 }
 
@@ -477,8 +631,6 @@ function App() {
   const [serverRoles, setServerRoles] = useState([]);
   const [serverRoleMembers, setServerRoleMembers] = useState([]);
   const [rolesOpen, setRolesOpen] = useState(false);
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const inviteProcessedRef = useRef(null);
 
   const [page, setPage] = useState("home");
   const [serverId, setServerId] = useState(null);
@@ -621,123 +773,48 @@ function App() {
     if (first) openChannel(first.id);
   }
 
-  function openChannel(id) {
-    // Selecting a channel is instant. The channelId effect below loads its
-    // messages automatically, so there is no second click or stale load.
-    setPage("server");
-    setChannelId(id);
-    setVoiceOpen(false);
-    setMobileMenu(false);
+  async function openChannel(id) {
+    setPage("server"); setChannelId(id); setVoiceOpen(false);
+    const { data } = await supabase.from("server_messages").select("*").eq("channel_id", id).order("created_at");
+    setMessages(data || []);
   }
 
   async function openDm(user) {
-    if (!user?.id || !session?.user?.id) return;
-
-    setPage("home");
-    setDmUserId(user.id);
-    setServerId(null);
-    setChannelId(null);
-    setVoiceOpen(false);
-    setMobileMenu(false);
-
-    // DM conversations are created through a SECURITY DEFINER RPC.
-    // This keeps the database RLS protection in place while allowing the
-    // signed-in user to safely create a private conversation with another user.
-    const { data: conversationId, error } = await supabase.rpc("create_dm_conversation", {
-      p_other_user: user.id
-    });
-
-    if (error) {
-      notify("Could not open DM", error.message, "⚠️");
-      return;
+    setPage("home"); setDmUserId(user.id); setServerId(null); setChannelId(null);
+    const { data: mine } = await supabase.from("dm_members").select("conversation_id").eq("user_id", session.user.id);
+    const ids = (mine || []).map(x => x.conversation_id);
+    let conversation = null;
+    if (ids.length) {
+      const { data: other } = await supabase.from("dm_members").select("conversation_id").eq("user_id", user.id).in("conversation_id", ids);
+      if (other?.[0]) conversation = other[0].conversation_id;
     }
-
-    if (!conversationId) {
-      notify("Could not open DM. No conversation was created.", "", "⚠️");
-      return;
+    if (!conversation) {
+      const { data: created, error } = await supabase.from("dm_conversations").insert({ created_by: session.user.id }).select().single();
+      if (error) { notify(error.message); return; }
+      conversation = created.id;
+      const { error: memberError } = await supabase.from("dm_members").insert([
+        { conversation_id: conversation, user_id: session.user.id },
+        { conversation_id: conversation, user_id: user.id }
+      ]);
+      if (memberError) { notify(memberError.message); return; }
     }
-
-    // Setting the conversation id automatically loads the DM messages in the
-    // effect below. This keeps the DM view in sync without another click.
-    setDmConversationId(conversationId);
+    setDmConversationId(conversation);
+    const { data: msgs } = await supabase.from("dm_messages").select("*").eq("conversation_id", conversation).order("created_at");
+    setDmMessages(msgs || []);
   }
 
   async function send() {
-    const content = text.trim();
-    if (!content) return;
-
-    // Clear the box immediately so Enter always feels instant. The saved
-    // message is then added to the current view directly from the database
-    // response, so the user never has to re-click the channel to see it.
-    setText("");
-
+    if (!text.trim()) return;
     if (page === "server" && channelId) {
-      if (!hasServerPermission("send_messages")) {
-        setText(content);
-        notify("You do not have permission to send messages in this server.");
-        return;
-      }
-      const activeChannelId = channelId;
-      const { data, error } = await supabase
-        .from("server_messages")
-        .insert({ channel_id: activeChannelId, user_id: me.id, content })
-        .select()
-        .single();
-      if (error) {
-        setText(content);
-        notify(error.message);
-        return;
-      }
-      // Only add it if the user is still looking at that same channel.
-      if (activeChannelId === channelId) {
-        setMessages(current => current.some(x => x.id === data.id) ? current : [...current, data]);
-      }
+      if (!hasServerPermission("send_messages")) { notify("You do not have permission to send messages in this server."); return; }
+      const { error } = await supabase.from("server_messages").insert({ channel_id: channelId, user_id: me.id, content: text.trim() });
+      if (error) notify(error.message);
     } else if (page === "home" && dmConversationId) {
-      const activeConversationId = dmConversationId;
-      const { data, error } = await supabase
-        .from("dm_messages")
-        .insert({ conversation_id: activeConversationId, user_id: me.id, content })
-        .select()
-        .single();
-      if (error) {
-        setText(content);
-        notify(error.message);
-        return;
-      }
-      if (activeConversationId === dmConversationId) {
-        setDmMessages(current => current.some(x => x.id === data.id) ? current : [...current, data]);
-      }
+      const { error } = await supabase.from("dm_messages").insert({ conversation_id: dmConversationId, user_id: me.id, content: text.trim() });
+      if (error) notify(error.message);
     }
+    setText("");
   }
-
-  // Reload messages automatically whenever the selected channel changes.
-  // This also protects against stale results when switching channels quickly.
-  useEffect(() => {
-    let cancelled = false;
-    if (page !== "server" || !channelId) return undefined;
-    setMessages([]);
-    supabase.from("server_messages").select("*").eq("channel_id", channelId).order("created_at")
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) { notify(error.message); return; }
-        setMessages(data || []);
-      });
-    return () => { cancelled = true; };
-  }, [page, channelId]);
-
-  // Reload the open DM automatically whenever its conversation changes.
-  useEffect(() => {
-    let cancelled = false;
-    if (page !== "home" || !dmConversationId) return undefined;
-    setDmMessages([]);
-    supabase.from("dm_messages").select("*").eq("conversation_id", dmConversationId).order("created_at")
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) { notify(error.message); return; }
-        setDmMessages(data || []);
-      });
-    return () => { cancelled = true; };
-  }, [page, dmConversationId]);
 
   async function updateMe(patch) {
     const { data, error } = await supabase.from("profiles").update(patch).eq("id", me.id).select().single();
@@ -788,29 +865,6 @@ function App() {
       notify(e.message || "Server image upload failed.");
     } finally {
       setUploadingServerMedia(false);
-    }
-  }
-
-  async function copyServerInvite(link) {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(link);
-      } else {
-        const area = document.createElement("textarea");
-        area.value = link;
-        area.style.position = "fixed";
-        area.style.opacity = "0";
-        document.body.appendChild(area);
-        area.focus();
-        area.select();
-        document.execCommand("copy");
-        area.remove();
-      }
-      notify("Invite link copied. Send it to anyone you want to invite.");
-      return true;
-    } catch (e) {
-      notify("Could not copy automatically. Select the invite link and copy it manually.");
-      return false;
     }
   }
 
@@ -913,79 +967,34 @@ function App() {
 
   useEffect(() => {
     if (!session?.user || !me) return;
-    const params = new URLSearchParams(window.location.search);
-    const inviteCode = params.get("invite")?.trim();
-    if (!inviteCode || inviteProcessedRef.current === inviteCode) return;
-
-    inviteProcessedRef.current = inviteCode;
-    (async () => {
-      const { data, error } = await supabase.rpc("join_server_by_invite", { p_invite_code: inviteCode });
-      const joinedServer = Array.isArray(data) ? data[0] : data;
-      window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
-
-      if (error || !joinedServer?.id) {
-        notify(error?.message || "That invite is invalid or no longer exists.");
-        return;
-      }
-
-      setServers(current => current.some(s => s.id === joinedServer.id)
-        ? current.map(s => s.id === joinedServer.id ? joinedServer : s)
-        : [...current, joinedServer].sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
-      notify(`Joined ${joinedServer.name}. Opening the server...`);
-      await openServer(joinedServer.id);
-    })();
-  }, [session?.user?.id, me?.id]);
-
-  useEffect(() => {
-    if (!session?.user || !me) return;
     loadAll();
-
     const presence = supabase.channel("global-presence");
     presence.on("presence", { event: "sync" }, () => {}).subscribe(async status => {
-      if (status === "SUBSCRIBED") {
-        await presence.track({ user_id: me.id, online_at: new Date().toISOString() });
-      }
+      if (status === "SUBSCRIBED") await presence.track({ user_id: me.id, online_at: new Date().toISOString() });
     });
-
     const changes = supabase.channel("vexel-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "server_messages" }, p => {
         if (p.eventType === "INSERT") {
-          // Only add the message to the channel that is currently open.
-          if (p.new.channel_id === channelId) {
-            setMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
-          }
-          if (p.new.user_id !== me.id && p.new.channel_id === channelId) {
-            notify("New server message");
-          }
+          setMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
+          if (p.new.user_id !== me.id) notify("New server message");
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "dm_messages" }, p => {
         if (p.eventType === "INSERT") {
-          // Only add the message to the DM that is currently open.
-          if (p.new.conversation_id === dmConversationId) {
-            setDmMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
-          }
-          if (p.new.user_id !== me.id && p.new.conversation_id === dmConversationId) {
-            notify("New private message");
-          }
+          if (p.new.conversation_id === dmConversationId) setDmMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
+          if (p.new.user_id !== me.id) notify("New private message");
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, p => {
-        if (p.eventType === "INSERT") {
-          setProfiles(a => [...a.filter(x => x.id !== p.new.id), p.new]);
-        }
+        if (p.eventType === "INSERT") setProfiles(a => [...a.filter(x => x.id !== p.new.id), p.new]);
         if (p.eventType === "UPDATE") {
           setProfiles(a => a.map(x => x.id === p.new.id ? p.new : x));
           if (p.new.id === me.id) setMe(p.new);
         }
       })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(presence);
-      supabase.removeChannel(changes);
-    };
-  }, [session?.user?.id, me?.id, dmConversationId, channelId]);
+    return () => { supabase.removeChannel(presence); supabase.removeChannel(changes); };
+  }, [session?.user?.id, me?.id, dmConversationId]);
 
   useEffect(() => {
     if (!me) return;
@@ -1067,7 +1076,6 @@ function App() {
         {!visibleProfiles.length && <p className="muted">Use ＋ to add/search people.</p>}
       </> : <>
         <div className="server-about">{selectedServer?.description || "Server"}</div>
-        {selectedServer?.invite_code && <button className="side-add invite-server-btn" onClick={() => setInviteOpen(true)}>🔗 Invite People</button>}
         <div className="side-section">TEXT CHANNELS</div>
         {serverChannels.filter(c => c.type === "text").map(c => <div className="channel-line" key={c.id}>
           <button className={channelId === c.id ? "channel selected" : "channel"} onClick={() => openChannel(c.id)}># {c.name}</button>
@@ -1097,16 +1105,16 @@ function App() {
       <main className="main">
         {page === "home" && dmUserId ? <>
           <header className="header"><div className="header-user" onClick={() => setProfileOpen(selectedDmUser)}><Avatar user={selectedDmUser} small /><div className="header-user-text"><b>{selectedDmUser?.display_name}</b><span>@{selectedDmUser?.username}</span><StaffBadgesUnderName user={selectedDmUser} onBadgeClick={() => {}} /></div></div><button onClick={() => setVoiceOpen(true)}>📞 Call</button></header>
-          <MessageList messages={dmMessages} profiles={profiles} scrollKey={dmConversationId || "dm"} />
-          <Composer text={text} setText={setText} send={send} focusKey={dmConversationId || "dm"} />
+          <MessageList messages={dmMessages} profiles={profiles} />
+          <Composer text={text} setText={setText} send={send} />
           {voiceOpen && selectedDmUser && <PrivateCall user={selectedDmUser} onClose={() => setVoiceOpen(false)} />}
         </> : page === "server" && selectedChannel ? <>
           <header className="header">
             <div><b># {selectedChannel.name}</b><span>Server channel</span></div>
             {selectedServer?.banner_url && <img className="header-server-banner" src={selectedServer.banner_url} alt="" />}
           </header>
-          <MessageList messages={messages} profiles={profiles} scrollKey={channelId || "channel"} />
-          <Composer text={text} setText={setText} send={send} focusKey={channelId || "channel"} />
+          <MessageList messages={messages} profiles={profiles} />
+          <Composer text={text} setText={setText} send={send} />
         </> : <div className="empty"><div className="big-logo">V</div><h1>Welcome to Vexel</h1><p>Choose a server or open Home to message people privately.</p></div>}
       </main>
     }
@@ -1114,7 +1122,6 @@ function App() {
     {profileOpen && <ProfileModal user={profileOpen} isSelf={profileOpen.id === me.id} onClose={() => setProfileOpen(null)} onSave={updateMe} onUploadAvatar={uploadAvatar} uploadingAvatar={uploadingAvatar} />}
     {rolesOpen && selectedServer && <ServerRolesModal server={selectedServer} members={serverMembers} profiles={profiles} roles={serverRoles} roleMembers={serverRoleMembers} canManage={hasServerPermission("manage_roles")} onClose={() => setRolesOpen(false)} onCreateRole={createServerRole} onUpdateRole={updateServerRole} onDeleteRole={deleteServerRole} onAssignRole={assignServerRole} onRemoveRole={removeServerRole} />}
     {addOpen && <AddPeople users={visibleProfiles} onClose={() => setAddOpen(false)} onPick={u => { setAddOpen(false); openDm(u); }} />}
-    {inviteOpen && selectedServer && <InviteModal server={selectedServer} onClose={() => setInviteOpen(false)} onInvite={copyServerInvite} />}
     {notice && <div className="toast">🔔 {notice}</div>}
 
     {adminOpen && canUseAdminPanel && <div className="admin-panel">
@@ -1231,76 +1238,15 @@ function App() {
   </div>;
 }
 
-function MessageList({ messages, profiles, scrollKey }) {
-  const listRef = useRef(null);
-  const previousCount = useRef(messages.length);
-  const previousKey = useRef(scrollKey);
-
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-
-    const changedConversation = previousKey.current !== scrollKey;
-    const wasNearBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight < 180;
-
-    // When opening or switching channels/DMs, immediately show the newest
-    // message instead of making the user scroll or click around.
-    // For new incoming messages, preserve the reader's position if they are
-    // intentionally reading older messages.
-    if (changedConversation || previousCount.current === 0 || messages.length < previousCount.current || wasNearBottom) {
-      requestAnimationFrame(() => {
-        if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-      });
-    }
-
-    previousCount.current = messages.length;
-    previousKey.current = scrollKey;
-  }, [messages.length, scrollKey]);
-
-  return <div className="messages" ref={listRef}>
-    {!messages.length && <div className="empty-messages">No messages yet. Start the conversation below.</div>}
-    {messages.map(m => {
-      const u = profiles.find(p => p.id === m.user_id);
-      return <div className="message" key={m.id}>
-        <button type="button" onClick={() => {}}><Avatar user={u} small /></button>
-        <div>
-          <div><b>{u?.display_name || "User"}</b><span className="time">{new Date(m.created_at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}</span></div>
-          <p>{m.content}</p>
-        </div>
-      </div>;
-    })}
-  </div>;
+function MessageList({ messages, profiles }) {
+  return <div className="messages">{messages.map(m => {
+    const u = profiles.find(p => p.id === m.user_id);
+    return <div className="message" key={m.id}><button onClick={() => {}}><Avatar user={u} small /></button><div><div><b>{u?.display_name || "User"}</b><span className="time">{new Date(m.created_at).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}</span></div><p>{m.content}</p></div></div>;
+  })}</div>;
 }
 
-function Composer({ text, setText, send, focusKey }) {
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    // Refocus every time the user opens or switches a channel/DM.
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.select?.();
-    });
-  }, [focusKey]);
-
-  return <div className="composer">
-    <input
-      ref={inputRef}
-      autoFocus
-      value={text}
-      onChange={e => setText(e.target.value)}
-      onKeyDown={e => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          send();
-        }
-      }}
-      placeholder="Write a message..."
-      aria-label="Write a message"
-    />
-    <button type="button" className="primary send" onClick={send}>➤</button>
-  </div>;
+function Composer({ text, setText, send }) {
+  return <div className="composer"><input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") send(); }} placeholder="Write a message..." /><button className="primary send" onClick={send}>➤</button></div>;
 }
 
 function PrivateCall({ user, onClose }) {
@@ -1308,7 +1254,7 @@ function PrivateCall({ user, onClose }) {
 }
 
 const CSS = `
-*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Inter,system-ui,sans-serif;background:#0b111b;color:#eef4ff}button,input,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit}input,textarea{width:100%;background:#111a29;border:1px solid #2d3b52;color:white;border-radius:10px;padding:12px}textarea{min-height:90px;resize:vertical}label{font-size:12px;font-weight:800;color:#9aa9bf}.app{display:flex;width:100%;height:100%;overflow:hidden;background:#101722}.loading,.auth{height:100%;display:grid;place-items:center;background:radial-gradient(circle at top,#243c66,#0a0f17)}.auth-card{width:min(430px,94vw);padding:32px;background:#151f2e;border:1px solid #30425e;border-radius:22px;box-shadow:0 30px 90px #0008}.logo,.big-logo{width:68px;height:68px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#4d86ff,#263ed0);font-size:36px;font-weight:900}.auth h1{margin:15px 0 5px;font-size:32px}.auth p,.muted{color:#8291a8}.auth form{display:grid;gap:9px;margin-top:22px}.primary,.danger,.controls button,.header button,.composer button{padding:11px 14px;border-radius:10px;background:#4d82ff;color:white;font-weight:800}.danger{background:#b93647}.link{background:transparent;color:#77a1ff;width:100%;margin-top:15px}.error{padding:10px;border-radius:9px;background:#47222b;color:#ffb4bf;font-size:13px}.rail{width:76px;min-width:76px;background:#0a1018;border-right:1px solid #202d40;display:flex;flex-direction:column;align-items:center;gap:9px;padding:10px}.rail-btn{width:52px;height:52px;border-radius:16px;background:#182334;font-weight:900;font-size:18px;display:grid;place-items:center;overflow:hidden}.rail-btn img{width:100%;height:100%;object-fit:cover}.rail-btn.active{background:#315ecf;box-shadow:0 0 0 2px #6e9bff}.rail-btn.add{color:#7da7ff;font-size:27px}.divider{height:1px;width:34px;background:#29384e}.spacer{flex:1}.sidebar{width:270px;min-width:270px;background:#151e2c;border-right:1px solid #26354c;overflow:auto}.side-head{height:72px;padding:14px 16px;border-bottom:1px solid #26354c;display:flex;justify-content:space-between;align-items:center}.side-head small,.side-section{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.2px}.side-head h3{margin:2px 0 0}.side-head button,.side-add{background:transparent;color:#86a9ff;padding:10px}.side-section{padding:15px 13px 6px}.user-row,.channel{width:100%;display:flex;align-items:center;gap:9px;background:transparent;padding:9px 11px;text-align:left;border-radius:8px}.user-row:hover,.channel:hover,.selected{background:#22304a}.user-row span{display:flex;flex-direction:column;min-width:0}.user-row small{color:#78869d}.online{margin-left:auto;width:8px;height:8px;border-radius:50%;background:#45d77b}.server-about{padding:14px;color:#8795aa;font-size:12px}.main{flex:1;min-width:0;display:flex;flex-direction:column;background:#101722}.header{min-height:68px;padding:10px 18px;border-bottom:1px solid #26354c;background:#131c29;display:flex;align-items:center;justify-content:space-between;gap:10px}.header span{color:#75849b;font-size:12px;margin-left:10px}.header-user{display:flex;align-items:center;gap:8px;cursor:pointer}.messages{flex:1;overflow:auto;padding:18px 22px;scroll-behavior:smooth}.empty-messages{display:grid;place-items:center;min-height:100%;color:#718098;text-align:center;padding:30px}.message{display:flex;gap:10px;padding:8px 0}.message p{margin:3px 0;color:#d4dcea;overflow-wrap:anywhere}.time{color:#68778e;font-size:10px;margin-left:7px}.composer{display:flex;gap:9px;padding:12px 17px;border-top:1px solid #26354c;background:#131c29}.send{width:50px}.empty{flex:1;display:grid;place-items:center;align-content:center;text-align:center;padding:30px}.empty p{color:#7f8da4}.big-logo{margin:auto}.avatar{width:52px;height:52px;border-radius:15px;object-fit:cover;background:linear-gradient(135deg,#435f98,#23334f);display:grid;place-items:center;font-weight:900}.avatar.small{width:36px;height:36px;border-radius:11px;font-size:12px}.modal-bg{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center;padding:20px}.modal{position:relative;width:min(560px,96vw);max-height:92vh;overflow:auto;background:#151f2e;border:1px solid #30425e;border-radius:18px;padding:25px}.close{position:absolute;right:14px;top:12px;background:#26364e;border-radius:8px;width:34px;height:34px;font-size:22px}.modal form{display:grid;gap:9px}.profile-top{display:flex;align-items:center;gap:14px;margin-bottom:20px}.profile-top h2{margin:0}.profile-top span,.profile-read p{color:#8493a9}.badges{display:flex;gap:6px;flex-wrap:wrap}.staff-badge{padding:4px 7px;border:1px solid #3b5276;background:#22314b;border-radius:8px;font-size:11px;color:#eef4ff}.profile-name-block{min-width:0}.profile-username{color:#8493a9;font-size:13px;margin-top:2px}.profile-staff-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.profile-staff-row .staff-badge{cursor:pointer}.header-user-text{display:flex;flex-direction:column;min-width:0}.header-user-text>span{margin-left:0}.results{margin-top:12px}.result{width:100%;display:flex;gap:10px;align-items:center;background:transparent;padding:9px;text-align:left;border-radius:9px}.result:hover{background:#22304a}.result span{display:flex;flex-direction:column}.result small{color:#7b899e}.invite-server-btn{width:100%;text-align:left;border-top:1px solid #26354c;border-bottom:1px solid #26354c;margin:2px 0 4px}.invite-note{color:#8b9ab0;font-size:13px;line-height:1.5}.invite-link-row{display:flex;gap:8px;align-items:stretch}.invite-link-row input{min-width:0}.invite-link-row button{white-space:nowrap}.invite-code{margin-top:12px;color:#7f8da4;font-size:12px}.invite-code b{color:#dbe6f7}.invite-modal{width:min(650px,96vw)}.toast{position:fixed;right:20px;bottom:20px;z-index:50;background:#22314b;border:1px solid #46618b;padding:12px 16px;border-radius:10px}.voice{flex:1;overflow:auto;padding:28px}.voice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}.video-tile{background:#0b111b;border:1px solid #2b3b54;border-radius:14px;overflow:hidden;padding:8px}.video-tile video{width:100%;aspect-ratio:16/9;object-fit:cover;background:#05080d;border-radius:10px}.video-tile b{display:block;padding:7px}.member-list{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.member-list>div{display:flex;align-items:center;gap:7px;background:#182437;padding:7px 9px;border-radius:9px}.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.controls button{background:#26364e}.call-panel{position:fixed;right:20px;bottom:20px;width:min(340px,90vw);background:#172337;border:1px solid #3d5272;padding:18px;border-radius:14px;z-index:30;display:grid;gap:10px}.call-panel span{color:#8d9ab0;font-size:12px}@media(max-width:800px){.rail{width:60px;min-width:60px}.rail-btn{width:44px;height:44px}.sidebar{width:210px;min-width:210px}}@media(max-width:620px){.sidebar{width:185px;min-width:185px}.messages{padding:14px}.voice{padding:18px}}
+*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Inter,system-ui,sans-serif;background:#0b111b;color:#eef4ff}button,input,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit}input,textarea{width:100%;background:#111a29;border:1px solid #2d3b52;color:white;border-radius:10px;padding:12px}textarea{min-height:90px;resize:vertical}label{font-size:12px;font-weight:800;color:#9aa9bf}.app{display:flex;width:100%;height:100%;overflow:hidden;background:#101722}.loading,.auth{height:100%;display:grid;place-items:center;background:radial-gradient(circle at top,#243c66,#0a0f17)}.auth-card{width:min(430px,94vw);padding:32px;background:#151f2e;border:1px solid #30425e;border-radius:22px;box-shadow:0 30px 90px #0008}.logo,.big-logo{width:68px;height:68px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#4d86ff,#263ed0);font-size:36px;font-weight:900}.auth h1{margin:15px 0 5px;font-size:32px}.auth p,.muted{color:#8291a8}.auth form{display:grid;gap:9px;margin-top:22px}.primary,.danger,.controls button,.header button,.composer button{padding:11px 14px;border-radius:10px;background:#4d82ff;color:white;font-weight:800}.danger{background:#b93647}.link{background:transparent;color:#77a1ff;width:100%;margin-top:15px}.error{padding:10px;border-radius:9px;background:#47222b;color:#ffb4bf;font-size:13px}.rail{width:76px;min-width:76px;background:#0a1018;border-right:1px solid #202d40;display:flex;flex-direction:column;align-items:center;gap:9px;padding:10px}.rail-btn{width:52px;height:52px;border-radius:16px;background:#182334;font-weight:900;font-size:18px;display:grid;place-items:center;overflow:hidden}.rail-btn img{width:100%;height:100%;object-fit:cover}.rail-btn.active{background:#315ecf;box-shadow:0 0 0 2px #6e9bff}.rail-btn.add{color:#7da7ff;font-size:27px}.divider{height:1px;width:34px;background:#29384e}.spacer{flex:1}.sidebar{width:270px;min-width:270px;background:#151e2c;border-right:1px solid #26354c;overflow:auto}.side-head{height:72px;padding:14px 16px;border-bottom:1px solid #26354c;display:flex;justify-content:space-between;align-items:center}.side-head small,.side-section{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.2px}.side-head h3{margin:2px 0 0}.side-head button,.side-add{background:transparent;color:#86a9ff;padding:10px}.side-section{padding:15px 13px 6px}.user-row,.channel{width:100%;display:flex;align-items:center;gap:9px;background:transparent;padding:9px 11px;text-align:left;border-radius:8px}.user-row:hover,.channel:hover,.selected{background:#22304a}.user-row span{display:flex;flex-direction:column;min-width:0}.user-row small{color:#78869d}.online{margin-left:auto;width:8px;height:8px;border-radius:50%;background:#45d77b}.server-about{padding:14px;color:#8795aa;font-size:12px}.main{flex:1;min-width:0;display:flex;flex-direction:column;background:#101722}.header{min-height:68px;padding:10px 18px;border-bottom:1px solid #26354c;background:#131c29;display:flex;align-items:center;justify-content:space-between;gap:10px}.header span{color:#75849b;font-size:12px;margin-left:10px}.header-user{display:flex;align-items:center;gap:8px;cursor:pointer}.messages{flex:1;overflow:auto;padding:18px 22px}.message{display:flex;gap:10px;padding:8px 0}.message p{margin:3px 0;color:#d4dcea;overflow-wrap:anywhere}.time{color:#68778e;font-size:10px;margin-left:7px}.composer{display:flex;gap:9px;padding:12px 17px;border-top:1px solid #26354c;background:#131c29}.send{width:50px}.empty{flex:1;display:grid;place-items:center;align-content:center;text-align:center;padding:30px}.empty p{color:#7f8da4}.big-logo{margin:auto}.avatar{width:52px;height:52px;border-radius:15px;object-fit:cover;background:linear-gradient(135deg,#435f98,#23334f);display:grid;place-items:center;font-weight:900}.avatar.small{width:36px;height:36px;border-radius:11px;font-size:12px}.modal-bg{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center;padding:20px}.modal{position:relative;width:min(560px,96vw);max-height:92vh;overflow:auto;background:#151f2e;border:1px solid #30425e;border-radius:18px;padding:25px}.close{position:absolute;right:14px;top:12px;background:#26364e;border-radius:8px;width:34px;height:34px;font-size:22px}.modal form{display:grid;gap:9px}.profile-top{display:flex;align-items:center;gap:14px;margin-bottom:20px}.profile-top h2{margin:0}.profile-top span,.profile-read p{color:#8493a9}.badges{display:flex;gap:6px;flex-wrap:wrap}.staff-badge{padding:4px 7px;border:1px solid #3b5276;background:#22314b;border-radius:8px;font-size:11px;color:#eef4ff}.profile-name-block{min-width:0}.profile-username{color:#8493a9;font-size:13px;margin-top:2px}.profile-staff-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.profile-staff-row .staff-badge{cursor:pointer}.header-user-text{display:flex;flex-direction:column;min-width:0}.header-user-text>span{margin-left:0}.results{margin-top:12px}.result{width:100%;display:flex;gap:10px;align-items:center;background:transparent;padding:9px;text-align:left;border-radius:9px}.result:hover{background:#22304a}.result span{display:flex;flex-direction:column}.result small{color:#7b899e}.toast{position:fixed;right:20px;bottom:20px;z-index:50;background:#22314b;border:1px solid #46618b;padding:12px 16px;border-radius:10px}.voice{flex:1;overflow:auto;padding:28px}.voice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}.video-tile{background:#0b111b;border:1px solid #2b3b54;border-radius:14px;overflow:hidden;padding:8px}.video-tile video{width:100%;aspect-ratio:16/9;object-fit:cover;background:#05080d;border-radius:10px}.video-tile b{display:block;padding:7px}.member-list{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.member-list>div{display:flex;align-items:center;gap:7px;background:#182437;padding:7px 9px;border-radius:9px}.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.controls button{background:#26364e}.call-panel{position:fixed;right:20px;bottom:20px;width:min(340px,90vw);background:#172337;border:1px solid #3d5272;padding:18px;border-radius:14px;z-index:30;display:grid;gap:10px}.call-panel span{color:#8d9ab0;font-size:12px}@media(max-width:800px){.rail{width:60px;min-width:60px}.rail-btn{width:44px;height:44px}.sidebar{width:210px;min-width:210px}}@media(max-width:620px){.sidebar{width:185px;min-width:185px}.messages{padding:14px}.voice{padding:18px}}
 
 /* CROSS-PLATFORM / MOBILE SUPPORT */
 .mobile-menu-btn{display:none}
