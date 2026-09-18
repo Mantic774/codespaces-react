@@ -1365,7 +1365,35 @@ function App() {
               <div className="admin-form">
                 <label>Server name</label><input value={serverDraft.name} onChange={e => setServerDraft(d => ({...d, name:e.target.value}))} />
                 <label>Description</label><textarea value={serverDraft.description} onChange={e => setServerDraft(d => ({...d, description:e.target.value}))} />
-                <button className="primary" onClick={saveServerSettings}>Save Server Settings</button>
+               
+               <div className="admin-card" style={{marginTop:14}}>
+  <h3>🔗 Server Invite Code</h3>
+  <p className="admin-muted">
+    Give this code to people you want to invite to your server.
+  </p>
+
+  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+    <input
+      value={selectedServer.invite_code || ""}
+      readOnly
+      style={{flex:1,minWidth:180}}
+    />
+
+    <button
+      className="primary"
+      onClick={() => {
+        if (selectedServer.invite_code) {
+          navigator.clipboard?.writeText(selectedServer.invite_code);
+          notify("Server invite code copied!");
+        }
+      }}
+      disabled={!selectedServer.invite_code}
+    >
+      📋 Copy Code
+    </button>
+  </div>
+</div>
+ <button className="primary" onClick={saveServerSettings}>Save Server Settings</button>
               </div>
               <div className="server-media" style={{marginTop:14}}>
                 <div className="media-card">
