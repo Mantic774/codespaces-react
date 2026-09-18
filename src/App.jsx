@@ -523,7 +523,223 @@ function InstallVexelModal({ canInstall, onInstall, onClose }) {
   </div></div>;
 }
 
-function VexelHomeHub({ me, servers, visibleProfiles, onAddPeople, onCreateServer, onJoinServer, onOpenProfile, onInstall }) {
+const VEXEL_MINI_GAMES = [
+  { id: "tictactoe", name: "Tic-Tac-Toe", icon: "⭕" },
+  { id: "rps", name: "Rock Paper Scissors", icon: "✊" },
+  { id: "guess", name: "Guess the Word", icon: "💡" },
+  { id: "quicktap", name: "Quick Tap", icon: "⚡" },
+];
+
+function MiniGamesModal({ game, onClose }) {
+  const [board, setBoard] = useState(Array(9).fill(""));
+  const [turn, setTurn] = useState("X");
+  const [rpsResult, setRpsResult] = useState("");
+  const [word, setWord] = useState("");
+  const [guess, setGuess] = useState("");
+  const [tapStart, setTapStart] = useState(null);
+  const [tapResult, setTapResult] = useState("");
+
+  const words = ["VEXEL", "SERVER", "GAMING", "FRIEND", "VOICE"];
+
+  function resetTicTacToe() {
+    setBoard(Array(9).fill(""));
+    setTurn("X");
+  }
+
+  function checkWinner(next) {
+    const wins = [
+      [0,1,2],[3,4,5],[6,7,8],
+      [0,3,6],[1,4,7],[2,5,8],
+      [0,4,8],[2,4,6]
+    ];
+
+    for (const [a,b,c] of wins) {
+      if (next[a] && next[a] === next[b] && next[a] === next[c]) {
+        return next[a];
+      }
+    }
+
+    return next.every(Boolean) ? "draw" : null;
+  }
+
+  function playTicTacToe(index) {
+    if (board[index]) return;
+
+    const next = [...board];
+    next[index] = turn;
+
+    const winner = checkWinner(next);
+    setBoard(next);
+
+    if (!winner) {
+      setTurn(turn === "X" ? "O" : "X");
+    }
+  }
+
+  function playRps(choice) {
+    const choices = ["Rock", "Paper", "Scissors"];
+    const computer = choices[Math.floor(Math.random() * choices.length)];
+
+    if (choice === computer) {
+      setRpsResult(`You both picked ${computer}. Draw!`);
+    } else if (
+      (choice === "Rock" && computer === "Scissors") ||
+      (choice === "Paper" && computer === "Rock") ||
+      (choice === "Scissors" && computer === "Paper")
+    ) {
+      setRpsResult(`You picked ${choice}. Vexel picked ${computer}. You win! 🎉`);
+    } else {
+      setRpsResult(`You picked ${choice}. Vexel picked ${computer}. Try again!`);
+    }
+  }
+
+  function startGuessGame() {
+    setWord(words[Math.floor(Math.random() * words.length)]);
+    setGuess("");
+    setTapResult("");
+  }
+
+  function checkGuess() {
+    if (!word) startGuessGame();
+
+    if (guess.trim().toUpperCase() === word) {
+      setRpsResult("Correct! 🎉");
+    } else {
+      setRpsResult("Not quite — try again!");
+    }
+  }
+
+  function startQuickTap() {
+    setTapStart(Date.now());
+    setTapResult("GO!");
+  }
+
+  function finishQuickTap() {
+    if (!tapStart) return;
+
+    const time = Date.now() - tapStart;
+    setTapResult(`Your reaction time: ${time} ms`);
+    setTapStart(null);
+  }
+
+  return (
+    <div className="modal-bg">
+      <div className="modal mini-games-modal">
+        <button className="close" type="button" onClick={onClose}>×</button>
+
+        <div className="hub-kicker">VEXEL ARCADE</div>
+        <h2>🎮 Mini Games</h2>
+        <p className="admin-muted">
+          Quick games you can play while hanging out in Vexel.
+        </p>
+
+        <div className="mini-game-tabs">
+          {VEXEL_MINI_GAMES.map(item => (
+            <button
+              key={item.id}
+              className={game === item.id ? "active" : ""}
+              onClick={() => {
+                setRpsResult("");
+                setTapResult("");
+                onClose(item.id);
+              }}
+            >
+              {item.icon} {item.name}
+            </button>
+          ))}
+        </div>
+
+        {game === "tictactoe" && (
+          <div className="mini-game-card">
+            <h3>⭕ Tic-Tac-Toe</h3>
+            <p>Turn: {turn}</p>
+
+            <div className="tic-board">
+              {board.map((cell, index) => (
+                <button
+                  key={index}
+                  onClick={() => playTicTacToe(index)}
+                  className="tic-cell"
+                >
+                  {cell}
+                </button>
+              ))}
+            </div>
+
+            <button className="primary" onClick={resetTicTacToe}>
+              Restart
+            </button>
+          </div>
+        )}
+
+        {game === "rps" && (
+          <div className="mini-game-card">
+            <h3>✊ Rock Paper Scissors</h3>
+
+            <div className="game-buttons">
+              <button onClick={() => playRps("Rock")}>✊ Rock</button>
+              <button onClick={() => playRps("Paper")}>📄 Paper</button>
+              <button onClick={() => playRps("Scissors")}>✂️ Scissors</button>
+            </div>
+
+            {rpsResult && <div className="game-result">{rpsResult}</div>}
+          </div>
+        )}
+
+        {game === "guess" && (
+          <div className="mini-game-card">
+            <h3>💡 Guess the Word</h3>
+
+            <p>
+              Guess a Vexel-related word.
+            </p>
+
+            <button className="primary" onClick={startGuessGame}>
+              New Word
+            </button>
+
+            {word && (
+              <>
+                <input
+                  value={guess}
+                  onChange={e => setGuess(e.target.value)}
+                  placeholder="Your guess..."
+                />
+
+                <button className="primary" onClick={checkGuess}>
+                  Check Guess
+                </button>
+              </>
+            )}
+
+            {rpsResult && <div className="game-result">{rpsResult}</div>}
+          </div>
+        )}
+
+        {game === "quicktap" && (
+          <div className="mini-game-card">
+            <h3>⚡ Quick Tap</h3>
+
+            <p>Click the button as fast as you can.</p>
+
+            {!tapStart ? (
+              <button className="quick-tap" onClick={startQuickTap}>
+                START
+              </button>
+            ) : (
+              <button className="quick-tap" onClick={finishQuickTap}>
+                TAP!
+              </button>
+            )}
+
+            {tapResult && <div className="game-result">{tapResult}</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function VexelHomeHub({ me, servers, visibleProfiles, onAddPeople, onCreateServer, onJoinServer, onOpenProfile, onInstall, onMiniGames }) {
   const online = visibleProfiles.filter(u => String(u.status || '').toLowerCase() === 'online').length;
   return <div className="vexel-hub">
     <section className="hub-hero">
@@ -545,6 +761,13 @@ function VexelHomeHub({ me, servers, visibleProfiles, onAddPeople, onCreateServe
       </button>
       <button type="button" className="hub-card" onClick={onCreateServer}>
         <span className="hub-icon">＋</span><div><b>Create a Space</b><small>Build a server with your own identity and rules</small></div>
+      </button>
+            <button type="button" className="hub-card" onClick={onMiniGames}>
+        <span className="hub-icon">🎮</span>
+        <div>
+          <b>Mini Games</b>
+          <small>Play quick games with your friends</small>
+        </div>
       </button>
       <button type="button" className="hub-card" onClick={onOpenProfile}>
         <span className="hub-icon">◌</span><div><b>Your Profile</b><small>Customize your Vexel identity and connections</small></div>
@@ -592,6 +815,8 @@ function App() {
   const [installPrompt, setInstallPrompt] = useState(null);
   const [installOpen, setInstallOpen] = useState(false);
   const [incomingCall, setIncomingCall] = useState(null);
+
+  const [miniGame, setMiniGame] = useState(null);
 
   const [page, setPage] = useState("home");
   const [serverId, setServerId] = useState(null);
@@ -1265,11 +1490,12 @@ function App() {
           </header>
           <MessageList messages={messages} profiles={profiles} />
           <Composer text={text} setText={setText} send={send} disabled={!canSendToChannel(selectedChannel)} placeholder={selectedChannel?.is_locked ? "Channel is locked for your role" : "Write a message..."} />
-        </> : <VexelHomeHub me={me} servers={servers} visibleProfiles={visibleProfiles} onAddPeople={() => setAddOpen(true)} onCreateServer={createServer} onJoinServer={() => { const code = prompt("Enter the server invite code"); if (code) joinServerByCode(code); }} onOpenProfile={() => setProfileOpen(me)} onInstall={() => setInstallOpen(true)} />}
+</> : <VexelHomeHub me={me} servers={servers} visibleProfiles={visibleProfiles} onAddPeople={() => setAddOpen(true)} onCreateServer={createServer} onJoinServer={() => { const code = prompt("Enter the server invite code"); if (code) joinServerByCode(code); }} onOpenProfile={() => setProfileOpen(me)} onInstall={() => setInstallOpen(true)} onMiniGames={() => setMiniGame("menu")} />}
       </main>
     }
 
 {installOpen && <InstallVexelModal canInstall={!!installPrompt} onInstall={installVexel} onClose={() => setInstallOpen(false)} />}
+  {miniGame && <MiniGamesModal game={miniGame} onClose={(nextGame) => setMiniGame(nextGame || null)} />}
     {profileOpen && <ProfileModal user={profileOpen} isSelf={profileOpen.id === me.id} onClose={() => setProfileOpen(null)} onSave={updateMe} onUploadAvatar={uploadAvatar} uploadingAvatar={uploadingAvatar} />}
     {rolesOpen && selectedServer && <ServerRolesModal server={selectedServer} members={serverMembers} profiles={profiles} roles={serverRoles} roleMembers={serverRoleMembers} canManage={hasServerPermission("manage_roles")} onClose={() => setRolesOpen(false)} onCreateRole={createServerRole} onUpdateRole={updateServerRole} onDeleteRole={deleteServerRole} onAssignRole={assignServerRole} onRemoveRole={removeServerRole} />}
     {channelAccessOpen && selectedServer && <ChannelAccessModal channel={channelAccessOpen} roles={serverRoles} onSave={saveChannelAccess} onClose={() => setChannelAccessOpen(null)} />}
