@@ -67,243 +67,59 @@ function StaffBadgesUnderName({ user, onBadgeClick }) {
 
 function Auth({ onDone }) {
   const [mode, setMode] = useState("login");
-  const [method, setMethod] = useState("email");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [codeSent, setCodeSent] = useState(false);
-
-  function resetCodeFlow() {
-    setCodeSent(false);
-    setCode("");
-    setError("");
-  }
 
   async function submit(e) {
     e.preventDefault();
-    setBusy(true);
-    setError("");
-
+    setBusy(true); setError("");
     try {
-      if (!codeSent) {
-        if (mode === "signup" && !/^[a-zA-Z0-9_]{3,24}$/.test(username)) {
-          throw new Error("Username must be 3-24 letters, numbers, or underscores.");
-        }
-
-        if (method === "email") {
-          const cleanEmail = email.trim().toLowerCase();
-          if (!cleanEmail.includes("@")) {
-            throw new Error("Enter a valid email address.");
-          }
-
-          const { error } = await supabase.auth.signInWithOtp({
-            email: cleanEmail,
-            options: {
-              shouldCreateUser: true,
-              data: mode === "signup"
-                ? {
-                    username: username.trim().toLowerCase(),
-                    display_name: displayName.trim() || username.trim()
-                  }
-                : undefined
-            }
-          });
-
-          if (error) throw error;
-          setEmail(cleanEmail);
-        } else {
-          const cleanPhone = phone.trim();
-          if (!cleanPhone) {
-            throw new Error("Enter your phone number.");
-          }
-
-          const { error } = await supabase.auth.signInWithOtp({
-            phone: cleanPhone,
-            options: {
-              shouldCreateUser: true,
-              data: mode === "signup"
-                ? {
-                    username: username.trim().toLowerCase(),
-                    display_name: displayName.trim() || username.trim()
-                  }
-                : undefined
-            }
-          });
-
-          if (error) throw error;
-          setPhone(cleanPhone);
-        }
-
-        setCodeSent(true);
-        setError(method === "email"
-          ? "A verification code was sent to your email."
-          : "A verification code was sent to your phone.");
-        return;
-      }
-
-      const cleanCode = code.replace(/\D/g, "").slice(0, 6);
-      if (cleanCode.length < 6) {
-        throw new Error("Enter the 6-digit verification code.");
-      }
-
-      if (method === "email") {
-        const { error } = await supabase.auth.verifyOtp({
-          email: email.trim().toLowerCase(),
-          token: cleanCode,
-          type: "email"
-        });
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        onDone();
       } else {
-        const { error } = await supabase.auth.verifyOtp({
-          phone: phone.trim(),
-          token: cleanCode,
-          type: "sms"
+        if (!/^[a-zA-Z0-9_]{3,24}$/.test(username)) throw new Error("Username must be 3-24 letters, numbers, or underscores.");
+        const { data, error } = await supabase.auth.signUp({
+          email, password,
+          options: { data: { username, display_name: displayName || username } }
         });
         if (error) throw error;
+        if (!data.session) {
+          setError("Check your email to confirm the account, then sign in.");
+        } else onDone();
       }
-
-      onDone();
     } catch (err) {
       setError(err.message || "Something went wrong.");
-    } finally {
-      setBusy(false);
-    }
+    } finally { setBusy(false); }
   }
 
   return <div className="auth">
     <div className="auth-card">
       <div className="logo">V</div>
       <h1>Vexel</h1>
-      <p>Sign in or create your Vexel account with a verification code.</p>
-
-      <div className="auth-methods">
-        <button
-          type="button"
-          className={method === "email" ? "primary" : "secondary"}
-          onClick={() => {
-            setMethod("email");
-            resetCodeFlow();
-          }}
-          disabled={busy}
-        >
-          Email
-        </button>
-        <button
-          type="button"
-          className={method === "phone" ? "primary" : "secondary"}
-          onClick={() => {
-            setMethod("phone");
-            resetCodeFlow();
-          }}
-          disabled={busy}
-        >
-          Phone
-        </button>
-      </div>
-
+      <p>Real accounts, servers, DMs, presence, and voice.</p>
       <form onSubmit={submit}>
-        {mode === "signup" && !codeSent && <>
+        {mode === "signup" && <>
           <label>Vexel @username</label>
-          <input
-            value={username}
-            onChange={e => setUsername(e.target.value.replace(/^@/, ""))}
-            placeholder="@username"
-            maxLength={24}
-            required
-          />
+          <input value={username} onChange={e => setUsername(e.target.value.replace(/^@/, ""))} placeholder="@username" required />
           <label>Display name</label>
-          <input
-            value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
-            placeholder="Display name"
-            maxLength={40}
-          />
+          <input value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="Display name" />
         </>}
-
-        {method === "email" ? (
-          <>
-            <label>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              disabled={codeSent || busy}
-              required
-            />
-          </>
-        ) : (
-          <>
-            <label>Phone number</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="+1 502 555 0123"
-              disabled={codeSent || busy}
-              required
-            />
-          </>
-        )}
-
-        {codeSent && <>
-          <label>Verification code</label>
-          <input
-            type="text"
-            value={code}
-            onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            placeholder="Enter your 6-digit code"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            required
-            autoFocus
-          />
-        </>}
-
+        <label>Email</label>
+        <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" required />
+        <label>Password</label>
+        <input type="password" value={password} onChange={e => setPassword(e.target.value)} minLength={6} required />
         {error && <div className="error">{error}</div>}
-
-        <button className="primary" disabled={busy}>
-          {busy
-            ? "Please wait..."
-            : codeSent
-              ? "Verify Code"
-              : method === "email"
-                ? mode === "login" ? "Send Email Code" : "Create Account"
-                : mode === "login" ? "Send Phone Code" : "Create Account"}
-        </button>
+        <button className="primary" disabled={busy}>{busy ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}</button>
       </form>
-
-      {codeSent && (
-        <button
-          type="button"
-          className="link"
-          disabled={busy}
-          onClick={resetCodeFlow}
-        >
-          Use a different email or phone
-        </button>
-      )}
-
-      {!codeSent && (
-        <button
-          type="button"
-          className="link"
-          disabled={busy}
-          onClick={() => {
-            setMode(mode === "login" ? "signup" : "login");
-            setError("");
-            setCode("");
-            setCodeSent(false);
-          }}
-        >
-          {mode === "login" ? "Create a Vexel account" : "I already have an account"}
-        </button>
-      )}
+      <button className="link" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }}>
+        {mode === "login" ? "Create a Vexel account" : "I already have an account"}
+      </button>
     </div>
   </div>;
 }
@@ -605,6 +421,145 @@ function ServerRolesModal({ server, members, profiles, roles, roleMembers, canMa
   </div></div>;
 }
 
+
+function ChannelAccessModal({ channel, roles, onSave, onClose }) {
+  const [locked, setLocked] = useState(!!channel?.is_locked);
+  const [allowed, setAllowed] = useState(new Set(channel?.allowed_role_ids || []));
+  const [saving, setSaving] = useState(false);
+
+  function toggleRole(id) {
+    setAllowed(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onSave(channel, locked, Array.from(allowed));
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <div className="modal-bg">
+    <div className="modal role-modal">
+      <button className="close" onClick={onClose}>×</button>
+      <div className="profile-top">
+        <div>
+          <h2>🔒 Channel Access</h2>
+          <span>#{channel?.name} · Control who can send messages</span>
+        </div>
+      </div>
+      <div className="admin-section">
+        <label className="permission-row" style={{cursor:"pointer"}}>
+          <input type="checkbox" checked={locked} onChange={e => setLocked(e.target.checked)} />
+          <span><b>Lock this channel</b><small style={{display:"block",color:"#8190a7"}}>Everyone can still see the channel and its messages, but only the server owner and selected roles can send messages.</small></span>
+        </label>
+      </div>
+      <h3>🏷️ Roles allowed to send</h3>
+      <p className="admin-muted">Select the server roles that should be able to type while this channel is locked. Those roles must also have the Send Messages permission.</p>
+      <div className="admin-list">
+        {roles.map(role => {
+          const checked = allowed.has(role.id);
+          return <label className="permission-row" key={role.id} style={{cursor:"pointer"}}>
+            <input type="checkbox" checked={checked} onChange={() => toggleRole(role.id)} />
+            <span><b>{role.name}</b><small style={{display:"block",color:"#8190a7"}}>{role.permissions?.send_messages ? "Can send messages" : "Does not have Send Messages"}</small></span>
+          </label>;
+        })}
+        {!roles.length && <div className="admin-card">No server roles are available.</div>}
+      </div>
+      <div className="admin-actions" style={{marginTop:14}}>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={saving} onClick={save}>{saving ? "Saving..." : "Save Channel Access"}</button>
+      </div>
+    </div>
+  </div>;
+}
+
+function InstallVexelModal({ canInstall, onInstall, onClose }) {
+  const [platform, setPlatform] = useState("desktop");
+
+  useEffect(() => {
+    const ua = navigator.userAgent || "";
+    const touch = navigator.maxTouchPoints > 0;
+    if (/iPad|iPhone|iPod/i.test(ua) || (navigator.platform === "MacIntel" && touch)) setPlatform("ios");
+    else if (/Android/i.test(ua)) setPlatform("android");
+    else if (/Xbox/i.test(ua)) setPlatform("xbox");
+    else if (/Quest|Pico|VR|Valve Index|Vive/i.test(ua)) setPlatform("vr");
+    else if (/CrOS/i.test(ua)) setPlatform("chromebook");
+    else if (/Macintosh|Mac OS X/i.test(ua)) setPlatform("mac");
+    else if (/Windows/i.test(ua)) setPlatform("windows");
+    else setPlatform("desktop");
+  }, []);
+
+  const instructions = {
+    ios: { title: "iPhone & iPad", steps: ["Open Vexel in Safari.", "Tap the Share button.", "Choose Add to Home Screen.", "Tap Add. Vexel will open like an app."] },
+    android: { title: "Android", steps: ["Open Vexel in Chrome.", "Tap the browser menu.", "Choose Install app or Add to Home screen.", "Confirm the installation."] },
+    chromebook: { title: "Chromebook", steps: ["Open Vexel in Chrome.", "Use the Install icon in the address bar when it appears.", "Choose Install.", "Launch Vexel from your Chromebook apps."] },
+    windows: { title: "Windows PC", steps: ["Open Vexel in Chrome or Edge.", "Use the Install icon in the address bar when it appears.", "Choose Install.", "Vexel can then open in its own app window."] },
+    mac: { title: "macOS", steps: ["Open Vexel in a supported browser such as Chrome or Edge.", "Use the browser's Install option when available.", "Choose Install.", "Launch Vexel from the installed web app."] },
+    vr: { title: "VR headset", steps: ["Open Vexel using the headset's web browser.", "If the browser supports web-app installation, use its install/add-to-home option.", "Otherwise, bookmark Vexel for quick access."] },
+    xbox: { title: "Xbox", steps: ["Open Vexel in Microsoft Edge on Xbox.", "Sign in normally.", "Save Vexel as a favorite for quick access.", "A native Xbox Store app would require a separate Xbox app release."] },
+    desktop: { title: "Computer", steps: ["Open Vexel in Chrome or Edge.", "Use the Install icon in the address bar when it appears.", "Choose Install.", "Vexel will open in an app-style window."] }
+  }[platform];
+
+  return <div className="modal-bg"><div className="modal install-modal">
+    <button className="close" onClick={onClose}>×</button>
+    <div className="profile-top"><div><h2>📦 Install Vexel</h2><span>Use Vexel like an app on supported devices.</span></div></div>
+    {canInstall && <div className="upload-hint" style={{marginTop:12}}>Vexel can be installed directly on this device.</div>}
+    <div className="install-platforms">
+      {[["ios","📱 iPhone / iPad"],["android","🤖 Android"],["windows","💻 Windows"],["mac","🍎 macOS"],["chromebook","💻 Chromebook"],["vr","🥽 VR"],["xbox","🎮 Xbox"]].map(([key,label]) => <button type="button" key={key} className={platform===key ? "active" : ""} onClick={() => setPlatform(key)}>{label}</button>)}
+    </div>
+    <div className="install-guide">
+      <h3>{instructions.title}</h3>
+      <ol>{instructions.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
+    </div>
+    {canInstall && <button type="button" className="primary install-now" onClick={onInstall}>⬇ Install Vexel now</button>}
+    <p className="admin-muted" style={{marginTop:12}}>Xbox and some VR browsers use Vexel through their browser. Native store apps for those platforms are separate releases.</p>
+  </div></div>;
+}
+
+function VexelHomeHub({ me, servers, visibleProfiles, onAddPeople, onCreateServer, onJoinServer, onOpenProfile, onInstall }) {
+  const online = visibleProfiles.filter(u => String(u.status || '').toLowerCase() === 'online').length;
+  return <div className="vexel-hub">
+    <section className="hub-hero">
+      <div className="hub-mark">V</div>
+      <div className="hub-copy">
+        <span className="hub-kicker">VEXEL HUB</span>
+        <h1>Welcome back, {me?.display_name || me?.username || 'there'}.</h1>
+        <p>Your people, spaces, and conversations — organized your way.</p>
+      </div>
+      <div className="hub-actions">
+        <button type="button" onClick={onAddPeople}>＋ Add People</button>
+        <button type="button" onClick={onJoinServer}>Enter Server Code</button>
+        <button type="button" onClick={onInstall}>📦 Install Vexel</button>
+      </div>
+    </section>
+    <section className="hub-grid">
+      <button type="button" className="hub-card" onClick={onAddPeople}>
+        <span className="hub-icon">◎</span><div><b>People</b><small>{visibleProfiles.length} available connections · {online} online</small></div>
+      </button>
+      <button type="button" className="hub-card" onClick={onCreateServer}>
+        <span className="hub-icon">＋</span><div><b>Create a Space</b><small>Build a server with your own identity and rules</small></div>
+      </button>
+      <button type="button" className="hub-card" onClick={onOpenProfile}>
+        <span className="hub-icon">◌</span><div><b>Your Profile</b><small>Customize your Vexel identity and connections</small></div>
+      </button>
+    </section>
+    <section className="hub-section">
+      <div className="hub-section-head"><div><span className="hub-kicker">YOUR SPACES</span><h2>Jump back in</h2></div><span>{servers.length} spaces</span></div>
+      {servers.length ? <div className="hub-space-list">{servers.slice(0, 6).map(s => <div className="hub-space" key={s.id}>
+        <div className="hub-space-icon">{s.icon_url ? <img src={s.icon_url} alt="" /> : (s.name || 'S').slice(0,1).toUpperCase()}</div>
+        <div><b>{s.name}</b><small>{s.description || 'Vexel space'}</small></div>
+      </div>)}</div> : <div className="hub-empty">You haven't joined any spaces yet. Use <b>Enter Server Code</b> to join one.</div>}
+    </section>
+  </div>;
+}
+
 function App() {
   const [session, setSession] = useState(null);
   const [me, setMe] = useState(null);
@@ -614,6 +569,8 @@ function App() {
   const [serverMembers, setServerMembers] = useState([]);
   const [messages, setMessages] = useState([]);
   const [dmMessages, setDmMessages] = useState([]);
+  const [serverMessagesByChannel, setServerMessagesByChannel] = useState({});
+  const [dmMessagesByConversation, setDmMessagesByConversation] = useState({});
   const [dmUserId, setDmUserId] = useState(null);
   const [dmConversationId, setDmConversationId] = useState(null);
   const [text, setText] = useState("");
@@ -631,6 +588,10 @@ function App() {
   const [serverRoles, setServerRoles] = useState([]);
   const [serverRoleMembers, setServerRoleMembers] = useState([]);
   const [rolesOpen, setRolesOpen] = useState(false);
+  const [channelAccessOpen, setChannelAccessOpen] = useState(null);
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [installOpen, setInstallOpen] = useState(false);
+  const [incomingCall, setIncomingCall] = useState(null);
 
   const [page, setPage] = useState("home");
   const [serverId, setServerId] = useState(null);
@@ -663,6 +624,31 @@ function App() {
 
   function hasServerPermission(permission) {
     return isServerOwner || !!myServerPermissions()[permission] || canUseAdminPanel;
+  }
+
+  function canSendToChannel(channel = selectedChannel) {
+    if (!channel || channel.type !== "text") return false;
+    if (!hasServerPermission("send_messages")) return false;
+    if (!channel.is_locked) return true;
+    if (isServerOwner) return true;
+    const roleIds = new Set(serverRoleMembers.filter(x => x.user_id === me?.id).map(x => x.role_id));
+    return (channel.allowed_role_ids || []).some(id => roleIds.has(id));
+  }
+
+  async function startPrivateCall(user) {
+    if (!user?.id || !me?.id || !dmConversationId) return notify("Open the DM before starting a call.");
+    const inviteRoom = supabase.channel(`call-invite:${user.id}`);
+    inviteRoom.subscribe(async status => {
+      if (status === "SUBSCRIBED") {
+        await inviteRoom.send({
+          type: "broadcast",
+          event: "incoming-call",
+          payload: { callerId: me.id, callerName: me.display_name, conversationId: dmConversationId }
+        });
+        setTimeout(() => supabase.removeChannel(inviteRoom), 2500);
+      }
+    });
+    setVoiceOpen(true);
   }
 
   async function refreshServerRoles(id = serverId) {
@@ -749,10 +735,57 @@ function App() {
     const membershipsResult = await supabase.from("server_members").select("server_id").eq("user_id", session.user.id);
     const memberships = membershipsResult.data || [];
     const allowed = new Set(memberships.map(x => x.server_id));
-    setServers((ss || []).filter(s => allowed.has(s.id) || s.owner_id === session.user.id));
-    if (!serverId) {
-      const first = (ss || []).find(s => allowed.has(s.id) || s.owner_id === session.user.id);
-      if (first) openServer(first.id);
+    const visibleServers = (ss || []).filter(s => allowed.has(s.id) || s.owner_id === session.user.id);
+    setServers(visibleServers);
+
+    // Preload every visible server channel's messages so users do not have to
+    // click into a channel first just to refresh/load its chat.
+    const visibleServerIds = visibleServers.map(s => s.id);
+    if (visibleServerIds.length) {
+      const { data: allChannels } = await supabase
+        .from("channels")
+        .select("id,server_id")
+        .in("server_id", visibleServerIds);
+      const channelIds = (allChannels || []).map(c => c.id);
+      if (channelIds.length) {
+        const { data: allServerMessages } = await supabase
+          .from("server_messages")
+          .select("*")
+          .in("channel_id", channelIds)
+          .order("created_at");
+        const grouped = {};
+        (allServerMessages || []).forEach(m => {
+          (grouped[m.channel_id] ||= []).push(m);
+        });
+        setServerMessagesByChannel(grouped);
+        if (channelId && grouped[channelId]) setMessages(grouped[channelId]);
+      } else {
+        setServerMessagesByChannel({});
+      }
+    } else {
+      setServerMessagesByChannel({});
+    }
+
+    // Preload all DM conversations the signed-in user belongs to.
+    const { data: myDmMembers } = await supabase
+      .from("dm_members")
+      .select("conversation_id")
+      .eq("user_id", session.user.id);
+    const conversationIds = (myDmMembers || []).map(x => x.conversation_id);
+    if (conversationIds.length) {
+      const { data: allDmMessages } = await supabase
+        .from("dm_messages")
+        .select("*")
+        .in("conversation_id", conversationIds)
+        .order("created_at");
+      const groupedDms = {};
+      (allDmMessages || []).forEach(m => {
+        (groupedDms[m.conversation_id] ||= []).push(m);
+      });
+      setDmMessagesByConversation(groupedDms);
+      if (dmConversationId && groupedDms[dmConversationId]) setDmMessages(groupedDms[dmConversationId]);
+    } else {
+      setDmMessagesByConversation({});
     }
   }
 
@@ -775,8 +808,15 @@ function App() {
 
   async function openChannel(id) {
     setPage("server"); setChannelId(id); setVoiceOpen(false);
+    const cached = serverMessagesByChannel[id];
+    if (cached) {
+      setMessages(cached);
+      return;
+    }
     const { data } = await supabase.from("server_messages").select("*").eq("channel_id", id).order("created_at");
-    setMessages(data || []);
+    const next = data || [];
+    setMessages(next);
+    setServerMessagesByChannel(prev => ({ ...prev, [id]: next }));
   }
 
   async function openDm(user) {
@@ -799,14 +839,24 @@ function App() {
       if (memberError) { notify(memberError.message); return; }
     }
     setDmConversationId(conversation);
-    const { data: msgs } = await supabase.from("dm_messages").select("*").eq("conversation_id", conversation).order("created_at");
-    setDmMessages(msgs || []);
+    const cached = dmMessagesByConversation[conversation];
+    if (cached) {
+      setDmMessages(cached);
+    } else {
+      const { data: msgs } = await supabase.from("dm_messages").select("*").eq("conversation_id", conversation).order("created_at");
+      const next = msgs || [];
+      setDmMessages(next);
+      setDmMessagesByConversation(prev => ({ ...prev, [conversation]: next }));
+    }
   }
 
   async function send() {
     if (!text.trim()) return;
     if (page === "server" && channelId) {
-      if (!hasServerPermission("send_messages")) { notify("You do not have permission to send messages in this server."); return; }
+      if (!canSendToChannel(selectedChannel)) {
+        notify(selectedChannel?.is_locked ? "This channel is locked for your role." : "You do not have permission to send messages in this server.");
+        return;
+      }
       const { error } = await supabase.from("server_messages").insert({ channel_id: channelId, user_id: me.id, content: text.trim() });
       if (error) notify(error.message);
     } else if (page === "home" && dmConversationId) {
@@ -868,6 +918,19 @@ function App() {
     }
   }
 
+  async function joinServerByCode(rawCode) {
+    const code = String(rawCode || '').trim();
+    if (!code) return;
+    const { data: server, error } = await supabase.from("servers").select("*").eq("invite_code", code).maybeSingle();
+    if (error) return notify(error.message);
+    if (!server) return notify("That server code was not found.");
+    const { error: memberError } = await supabase.from("server_members").upsert({ server_id: server.id, user_id: me.id }, { onConflict: "server_id,user_id", ignoreDuplicates: true });
+    if (memberError) return notify(memberError.message);
+    await loadAll();
+    notify(`Joined ${server.name}.`);
+    openServer(server.id);
+  }
+
   async function createServer() {
     const name = prompt("Server name");
     if (!name?.trim()) return;
@@ -898,6 +961,20 @@ function App() {
     });
     if (error) return notify(error.message);
     await openServer(serverId);
+  }
+
+
+  async function saveChannelAccess(channel, locked, allowedRoleIds) {
+    if (!hasServerPermission("manage_channels")) return notify("You do not have permission to manage channels.");
+    const safeRoleIds = Array.from(new Set((allowedRoleIds || []).filter(id => serverRoles.some(r => r.id === id))));
+    const { data, error } = await supabase.from("channels")
+      .update({ is_locked: !!locked, allowed_role_ids: safeRoleIds })
+      .eq("id", channel.id)
+      .select()
+      .single();
+    if (error) return notify(error.message);
+    setChannels(list => list.map(c => c.id === data.id ? data : c));
+    notify(locked ? `#${data.name} is now locked.` : `#${data.name} is now unlocked.`);
   }
 
   async function renameChannel(channel) {
@@ -950,6 +1027,51 @@ function App() {
   }
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const ensureMeta = (name, content) => {
+      let meta = document.querySelector(`meta[name="${name}"]`);
+      if (!meta) { meta = document.createElement("meta"); meta.name = name; document.head.appendChild(meta); }
+      meta.content = content;
+    };
+    let manifest = document.querySelector('link[rel="manifest"]');
+    if (!manifest) { manifest = document.createElement("link"); manifest.rel = "manifest"; document.head.appendChild(manifest); }
+    manifest.href = "/manifest.webmanifest";
+    ensureMeta("theme-color", "#315ecf");
+    ensureMeta("apple-mobile-web-app-capable", "yes");
+    ensureMeta("apple-mobile-web-app-status-bar-style", "black-translucent");
+    ensureMeta("apple-mobile-web-app-title", "Vexel");
+    let appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+    if (!appleIcon) { appleIcon = document.createElement("link"); appleIcon.rel = "apple-touch-icon"; document.head.appendChild(appleIcon); }
+    appleIcon.href = "/icons/icon-192.png";
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(err => console.warn("Vexel service worker registration failed:", err));
+    }
+    const onInstallPrompt = e => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    const onInstalled = () => setInstallPrompt(null);
+    window.addEventListener("beforeinstallprompt", onInstallPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onInstallPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  async function installVexel() {
+    if (!installPrompt) return;
+    try {
+      await installPrompt.prompt();
+      await installPrompt.userChoice;
+    } catch (err) {
+      console.warn("Vexel install prompt failed:", err);
+    } finally {
+      setInstallPrompt(null);
+    }
+  }
+
+  useEffect(() => {
     let mounted = true;
     supabase.auth.getSession().then(async ({ data }) => {
       if (!mounted) return;
@@ -975,13 +1097,27 @@ function App() {
     const changes = supabase.channel("vexel-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "server_messages" }, p => {
         if (p.eventType === "INSERT") {
-          setMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
+          setServerMessagesByChannel(prev => {
+            const current = prev[p.new.channel_id] || [];
+            if (current.some(x => x.id === p.new.id)) return prev;
+            return { ...prev, [p.new.channel_id]: [...current, p.new] };
+          });
+          if (p.new.channel_id === channelId) {
+            setMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
+          }
           if (p.new.user_id !== me.id) notify("New server message");
         }
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "dm_messages" }, p => {
         if (p.eventType === "INSERT") {
-          if (p.new.conversation_id === dmConversationId) setDmMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
+          setDmMessagesByConversation(prev => {
+            const current = prev[p.new.conversation_id] || [];
+            if (current.some(x => x.id === p.new.id)) return prev;
+            return { ...prev, [p.new.conversation_id]: [...current, p.new] };
+          });
+          if (p.new.conversation_id === dmConversationId) {
+            setDmMessages(m => m.some(x => x.id === p.new.id) ? m : [...m, p.new]);
+          }
           if (p.new.user_id !== me.id) notify("New private message");
         }
       })
@@ -994,7 +1130,18 @@ function App() {
       })
       .subscribe();
     return () => { supabase.removeChannel(presence); supabase.removeChannel(changes); };
-  }, [session?.user?.id, me?.id, dmConversationId]);
+  }, [session?.user?.id, me?.id, dmConversationId, channelId]);
+
+  useEffect(() => {
+    if (!me?.id) return;
+    const invite = supabase.channel(`call-invite:${me.id}`);
+    invite.on("broadcast", { event: "incoming-call" }, ({ payload }) => {
+      if (!payload || payload.callerId === me.id) return;
+      const caller = profiles.find(p => p.id === payload.callerId);
+      setIncomingCall({ ...payload, caller: caller || { id: payload.callerId, display_name: payload.callerName || "Vexel user" } });
+    }).subscribe();
+    return () => { supabase.removeChannel(invite); };
+  }, [me?.id, profiles]);
 
   useEffect(() => {
     if (!me) return;
@@ -1046,6 +1193,8 @@ function App() {
     .channel-line{display:flex;align-items:center;width:100%}.channel-line .channel{flex:1}.channel-actions{display:flex;gap:2px;padding-right:6px}.channel-actions button{background:transparent;padding:5px;border-radius:6px}.channel-actions button:hover{background:#263852}.header-server-banner{height:44px;max-width:220px;object-fit:cover;border-radius:8px;border:1px solid #2c3e59}.upload-hint{padding:10px;border-radius:10px;background:#182a43;color:#9eb5d7;font-size:12px;margin-bottom:4px}
     .admin-warning{padding:12px;border-radius:10px;background:#3a2a1b;color:#ffd39b;font-size:12px;margin-bottom:12px}
     .role-modal{width:min(900px,96vw)}.role-layout{display:grid;grid-template-columns:220px 1fr;gap:18px}.role-list,.role-editor{background:#111b29;border:1px solid #2b3d58;border-radius:14px;padding:14px}.role-list{display:flex;flex-direction:column;gap:7px}.role-item{display:flex;align-items:center;gap:8px;background:transparent;padding:10px;border-radius:9px;text-align:left}.role-item.selected,.role-item:hover{background:#22304a}.role-dot{width:10px;height:10px;border-radius:50%;flex:none}.role-create{display:grid;gap:7px;margin-top:8px}.role-editor{display:grid;gap:9px}.role-editor h3{margin:8px 0 2px}.permission-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.permission-row{display:flex;align-items:center;gap:8px;background:#172337;border:1px solid #283b57;border-radius:9px;padding:9px;color:#d9e4f5}.permission-row input{width:auto}.role-editor input[type=color]{height:42px;padding:4px}.role-editor .active{background:#315ecf}.role-editor .danger{justify-self:start}
+    .vexel-hub{padding:34px;max-width:1000px;margin:0 auto;display:grid;gap:22px}.hub-hero{display:flex;align-items:center;gap:18px;padding:24px;border:1px solid #2b3d58;border-radius:22px;background:linear-gradient(135deg,#142239,#0f1827);box-shadow:0 20px 60px #0005}.hub-mark{width:64px;height:64px;border-radius:18px;display:grid;place-items:center;background:#315ecf;color:#fff;font-size:30px;font-weight:900;flex:none}.hub-copy{min-width:0;flex:1}.hub-kicker{font-size:11px;font-weight:900;letter-spacing:.14em;color:#7890b1}.hub-copy h1{margin:5px 0 6px;font-size:clamp(22px,4vw,34px)}.hub-copy p{margin:0;color:#9aabc1}.hub-actions{display:flex;gap:8px;flex-wrap:wrap}.hub-actions button,.hub-card{border:1px solid #30445f;background:#1a2a42;color:#eaf1fb;border-radius:12px;padding:11px 13px;font-weight:800}.hub-actions button:hover,.hub-card:hover{background:#223752}.hub-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.hub-card{text-align:left;display:flex;align-items:center;gap:12px;min-height:88px}.hub-card small{display:block;color:#8799b1;font-weight:500;margin-top:4px}.hub-icon{width:38px;height:38px;border-radius:11px;background:#0e1827;display:grid;place-items:center;font-size:20px;flex:none}.hub-section{padding:20px;border:1px solid #293c57;border-radius:18px;background:#121d2d}.hub-section-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin-bottom:14px}.hub-section-head h2{margin:3px 0 0}.hub-section-head>span{font-size:12px;color:#8294ad}.hub-space-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.hub-space{display:flex;gap:10px;align-items:center;padding:11px;border-radius:12px;background:#17263a}.hub-space-icon{width:42px;height:42px;border-radius:12px;background:#253a57;display:grid;place-items:center;font-weight:900;overflow:hidden}.hub-space-icon img{width:100%;height:100%;object-fit:cover}.hub-space b{display:block}.hub-space small{display:block;color:#8193ab;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px}.hub-empty{padding:18px;border:1px dashed #38506d;border-radius:12px;color:#9aacbf}.hub-empty b{color:#dce7f8}@media(max-width:800px){.hub-hero{align-items:flex-start;flex-wrap:wrap}.hub-actions{width:100%}.hub-grid{grid-template-columns:1fr}.hub-space-list{grid-template-columns:1fr}.vexel-hub{padding:20px 14px}}
+    .install-modal{width:min(640px,96vw)}.install-platforms{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.install-platforms button{background:#172337;border:1px solid #2b3d58;border-radius:10px;padding:10px 12px;color:#dce7f8}.install-platforms button.active{background:#315ecf;color:#fff}.install-guide{background:#172337;border:1px solid #2b3d58;border-radius:14px;padding:16px}.install-guide h3{margin-top:0}.install-guide ol{margin:0;padding-left:22px;color:#aebdd0}.install-guide li{margin:8px 0}.install-now{width:100%;margin-top:12px}
     @media(max-width:700px){.admin-window{height:94vh;width:98vw}.admin-nav{width:150px;min-width:150px}.admin-content{padding:16px}.server-media{grid-template-columns:1fr}}
   `;
 
@@ -1078,8 +1227,9 @@ function App() {
         <div className="server-about">{selectedServer?.description || "Server"}</div>
         <div className="side-section">TEXT CHANNELS</div>
         {serverChannels.filter(c => c.type === "text").map(c => <div className="channel-line" key={c.id}>
-          <button className={channelId === c.id ? "channel selected" : "channel"} onClick={() => openChannel(c.id)}># {c.name}</button>
+          <button className={channelId === c.id ? "channel selected" : "channel"} onClick={() => openChannel(c.id)}># {c.name}{c.is_locked ? " 🔒" : ""}</button>
           {hasServerPermission("manage_channels") && <span className="channel-actions">
+            <button title={c.is_locked ? "Unlock channel" : "Lock channel"} onClick={() => setChannelAccessOpen(c)}>🔒</button>
             <button title="Rename" onClick={() => renameChannel(c)}>✏️</button>
             <button title="Delete" onClick={() => deleteChannel(c)}>🗑️</button>
           </span>}
@@ -1097,47 +1247,49 @@ function App() {
         {hasServerPermission("manage_server") && <button className="side-add" onClick={() => { setAdminTab("server"); setAdminOpen(true); }}>⚙️ Manage Server</button>}
       </>}
 
-      {page === "home" && <button className="side-add" onClick={() => setAddOpen(true)}>＋ Add People</button>}
+      {page === "home" && <><button className="side-add" onClick={() => setAddOpen(true)}>＋ Add People</button><button className="side-add" onClick={() => setInstallOpen(true)}>📦 Install Vexel</button></>}
     </aside>
     {mobileMenu && <button className="mobile-overlay" aria-label="Close navigation" onClick={() => setMobileMenu(false)} />}
 
     {page === "server" && selectedChannel && voiceOpen && selectedChannel.type === "voice" ? <Voice channel={selectedChannel} me={me} profiles={profiles} onLeave={() => setVoiceOpen(false)} /> :
       <main className="main">
         {page === "home" && dmUserId ? <>
-          <header className="header"><div className="header-user" onClick={() => setProfileOpen(selectedDmUser)}><Avatar user={selectedDmUser} small /><div className="header-user-text"><b>{selectedDmUser?.display_name}</b><span>@{selectedDmUser?.username}</span><StaffBadgesUnderName user={selectedDmUser} onBadgeClick={() => {}} /></div></div><button onClick={() => setVoiceOpen(true)}>📞 Call</button></header>
+          <header className="header"><div className="header-user" onClick={() => setProfileOpen(selectedDmUser)}><Avatar user={selectedDmUser} small /><div className="header-user-text"><b>{selectedDmUser?.display_name}</b><span>@{selectedDmUser?.username}</span><StaffBadgesUnderName user={selectedDmUser} onBadgeClick={() => {}} /></div></div><button onClick={() => startPrivateCall(selectedDmUser)}>📞 Call</button></header>
           <MessageList messages={dmMessages} profiles={profiles} />
           <Composer text={text} setText={setText} send={send} />
-          {voiceOpen && selectedDmUser && <PrivateCall user={selectedDmUser} onClose={() => setVoiceOpen(false)} />}
+          {voiceOpen && selectedDmUser && dmConversationId && <PrivateCall user={selectedDmUser} me={me} conversationId={dmConversationId} onClose={() => setVoiceOpen(false)} />}
         </> : page === "server" && selectedChannel ? <>
           <header className="header">
             <div><b># {selectedChannel.name}</b><span>Server channel</span></div>
             {selectedServer?.banner_url && <img className="header-server-banner" src={selectedServer.banner_url} alt="" />}
           </header>
           <MessageList messages={messages} profiles={profiles} />
-          <Composer text={text} setText={setText} send={send} />
-        </> : <div className="empty">
-          <div className="home-hero">
-            <div className="big-logo">V</div>
-            <div>
-              <div className="home-kicker">YOUR VEXEL SPACE</div>
-              <h1>Welcome to Vexel</h1>
-              <p>Keep up with your people, communities, and conversations in one place.</p>
-            </div>
-          </div>
-          <div className="quick-grid">
-            <button type="button" className="quick-card" onClick={() => setAddOpen(true)}><b>＋ Add People</b><span>Find someone by @username</span></button>
-            <button type="button" className="quick-card" onClick={createServer}><b>＋ Create Server</b><span>Start your own Vexel community</span></button>
-            <button type="button" className="quick-card" onClick={() => setProfileOpen(me)}><b>👤 Your Profile</b><span>Update your profile and avatar</span></button>
-          </div>
-          <div className="home-tip"><span>Vexel tip</span><b>Open a server from the side rail, or use Home for private messages.</b></div>
-        </div>}
+          <Composer text={text} setText={setText} send={send} disabled={!canSendToChannel(selectedChannel)} placeholder={selectedChannel?.is_locked ? "Channel is locked for your role" : "Write a message..."} />
+        </> : <VexelHomeHub me={me} servers={servers} visibleProfiles={visibleProfiles} onAddPeople={() => setAddOpen(true)} onCreateServer={createServer} onJoinServer={() => { const code = prompt("Enter the server invite code"); if (code) joinServerByCode(code); }} onOpenProfile={() => setProfileOpen(me)} onInstall={() => setInstallOpen(true)} />}
       </main>
     }
 
+{installOpen && <InstallVexelModal canInstall={!!installPrompt} onInstall={installVexel} onClose={() => setInstallOpen(false)} />}
     {profileOpen && <ProfileModal user={profileOpen} isSelf={profileOpen.id === me.id} onClose={() => setProfileOpen(null)} onSave={updateMe} onUploadAvatar={uploadAvatar} uploadingAvatar={uploadingAvatar} />}
     {rolesOpen && selectedServer && <ServerRolesModal server={selectedServer} members={serverMembers} profiles={profiles} roles={serverRoles} roleMembers={serverRoleMembers} canManage={hasServerPermission("manage_roles")} onClose={() => setRolesOpen(false)} onCreateRole={createServerRole} onUpdateRole={updateServerRole} onDeleteRole={deleteServerRole} onAssignRole={assignServerRole} onRemoveRole={removeServerRole} />}
+    {channelAccessOpen && selectedServer && <ChannelAccessModal channel={channelAccessOpen} roles={serverRoles} onSave={saveChannelAccess} onClose={() => setChannelAccessOpen(null)} />}
     {addOpen && <AddPeople users={visibleProfiles} onClose={() => setAddOpen(false)} onPick={u => { setAddOpen(false); openDm(u); }} />}
     {notice && <div className="toast">🔔 {notice}</div>}
+    {incomingCall && <div className="modal-bg" style={{zIndex:80}}>
+      <div className="modal call-incoming">
+        <div className="profile-top">
+          <Avatar user={incomingCall.caller} />
+          <div><h2 style={{margin:0}}>Incoming Vexel call</h2><p style={{margin:"5px 0 0",color:"#8d9ab0"}}>{incomingCall.caller?.display_name || "Someone"} is calling you.</p></div>
+        </div>
+        <div className="controls">
+          <button className="primary" onClick={() => {
+            const caller = incomingCall.caller;
+            setDmUserId(caller.id); setDmConversationId(incomingCall.conversationId); setPage("home"); setServerId(null); setChannelId(null); setIncomingCall(null); setVoiceOpen(true);
+          }}>📞 Accept</button>
+          <button className="danger" onClick={() => setIncomingCall(null)}>✕ Decline</button>
+        </div>
+      </div>
+    </div>}
 
     {adminOpen && canUseAdminPanel && <div className="admin-panel">
       <div className="admin-window">
@@ -1240,6 +1392,8 @@ function App() {
                 {serverChannels.map(channel => <div className="admin-row" key={channel.id}>
                   <div className="grow"><b>{channel.type === "voice" ? "🔊" : "#"} {channel.name}</b><small>{channel.type} channel</small></div>
                   <div className="admin-actions">
+                    {channel.type === "text" && <button className={channel.is_locked ? "active" : ""} onClick={() => setChannelAccessOpen(channel)}>🔒 {channel.is_locked ? "Locked" : "Lock"}</button>}
+                    {channel.type === "text" && <button onClick={() => setChannelAccessOpen(channel)}>🏷️ Access</button>}
                     <button onClick={() => renameChannel(channel)}>✏️ Rename</button>
                     <button className="danger" onClick={() => deleteChannel(channel)}>🗑️ Delete</button>
                   </div>
@@ -1260,35 +1414,120 @@ function MessageList({ messages, profiles }) {
   })}</div>;
 }
 
-function Composer({ text, setText, send }) {
-  return <div className="composer"><input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") send(); }} placeholder="Write a message..." /><button className="primary send" onClick={send}>➤</button></div>;
+function Composer({ text, setText, send, disabled = false, placeholder = "Write a message..." }) {
+  return <div className="composer"><input value={text} disabled={disabled} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !disabled) send(); }} placeholder={placeholder} /><button className="primary send" disabled={disabled} onClick={send}>➤</button></div>;
 }
 
-function PrivateCall({ user, onClose }) {
-  return <div className="call-panel"><b>Private call with {user.display_name}</b><span>For a real one-to-one call, use a voice channel or add a private-call signaling room.</span><button className="danger" onClick={onClose}>End Call</button></div>;
+function PrivateCall({ user, me, conversationId, onClose }) {
+  const [joined, setJoined] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [deafened, setDeafened] = useState(false);
+  const [participants, setParticipants] = useState([]);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const localStream = useRef(null);
+  const peer = useRef(null);
+  const room = useRef(null);
+  const remoteAudio = useRef(null);
+
+  const send = payload => room.current?.send({ type: "broadcast", event: "signal", payload });
+
+  async function connectPeer(peerId, createOffer = false) {
+    if (peer.current) return peer.current;
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    peer.current = pc;
+    localStream.current?.getTracks().forEach(track => pc.addTrack(track, localStream.current));
+    pc.onicecandidate = e => e.candidate && send({ kind: "ice", to: peerId, from: me.id, candidate: e.candidate });
+    pc.ontrack = e => setRemoteStream(e.streams[0]);
+    pc.onconnectionstatechange = () => {
+      if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
+        pc.close(); peer.current = null; setRemoteStream(null);
+      }
+    };
+    if (createOffer) {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      send({ kind: "offer", to: peerId, from: me.id, description: pc.localDescription });
+    }
+    return pc;
+  }
+
+  async function join() {
+    try {
+      localStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      room.current = supabase.channel(`call:${conversationId}`, { config: { presence: { key: me.id }, broadcast: { self: false } } });
+      room.current
+        .on("broadcast", { event: "signal" }, async ({ payload }) => {
+          if (!payload || payload.to !== me.id) return;
+          if (payload.kind === "offer") {
+            const pc = await connectPeer(payload.from, false);
+            await pc.setRemoteDescription(payload.description);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            send({ kind: "answer", to: payload.from, from: me.id, description: pc.localDescription });
+          }
+          if (payload.kind === "answer" && peer.current) await peer.current.setRemoteDescription(payload.description);
+          if (payload.kind === "ice" && peer.current) { try { await peer.current.addIceCandidate(payload.candidate); } catch {} }
+          if (payload.kind === "leave") { peer.current?.close(); peer.current = null; setRemoteStream(null); }
+        })
+        .on("presence", { event: "sync" }, async () => {
+          const state = room.current.presenceState();
+          const ids = Object.values(state).flat().map(x => x.user_id || x.key).filter(Boolean);
+          setParticipants(Array.from(new Set(ids)));
+          const other = ids.find(id => id !== me.id);
+          if (other && me.id < other) await connectPeer(other, true);
+        })
+        .on("presence", { event: "join" }, async ({ key }) => {
+          setParticipants(p => Array.from(new Set([...p, key])));
+          if (key !== me.id && me.id < key) await connectPeer(key, true);
+        })
+        .on("presence", { event: "leave" }, ({ key }) => {
+          setParticipants(p => p.filter(id => id !== key));
+          if (key !== me.id) { peer.current?.close(); peer.current = null; setRemoteStream(null); }
+        })
+        .subscribe(async status => {
+          if (status !== "SUBSCRIBED") return;
+          setJoined(true);
+          await room.current.track({ user_id: me.id, display_name: me.display_name });
+        });
+    } catch (e) {
+      alert(e.message || "Microphone permission was denied.");
+    }
+  }
+
+  async function leave() {
+    send({ kind: "leave", from: me.id });
+    if (room.current) { await room.current.untrack(); supabase.removeChannel(room.current); }
+    peer.current?.close(); peer.current = null;
+    localStream.current?.getTracks().forEach(t => t.stop());
+    localStream.current = null; setRemoteStream(null); setJoined(false); onClose();
+  }
+
+  async function toggleMute() {
+    const next = !muted;
+    localStream.current?.getAudioTracks().forEach(t => { t.enabled = !next; });
+    setMuted(next);
+  }
+
+  useEffect(() => { if (remoteAudio.current) remoteAudio.current.srcObject = remoteStream; }, [remoteStream]);
+  useEffect(() => { join(); return () => { if (room.current || localStream.current) leave(); }; }, []);
+
+  return <div className="call-panel">
+    <div><b>📞 Call with {user.display_name}</b><span>{joined ? `${participants.length || 1} participant${participants.length === 1 ? "" : "s"} connected` : "Connecting..."}</span></div>
+    <audio ref={remoteAudio} autoPlay playsInline muted={deafened} />
+    <div className="call-participants">
+      <div className="call-person"><Avatar user={me} small /><span>{me.display_name} <small>{muted ? "Muted" : "Speaking ready"}</small></span></div>
+      <div className="call-person"><Avatar user={user} small /><span>{user.display_name} <small>{remoteStream ? "Connected" : "Waiting for audio"}</small></span></div>
+    </div>
+    <div className="controls">
+      <button onClick={toggleMute}>{muted ? "🎙️ Unmute" : "🎤 Mute"}</button>
+      <button onClick={() => setDeafened(v => !v)}>{deafened ? "🔊 Undeafen" : "🔇 Deafen"}</button>
+      <button className="danger" onClick={leave}>📞 End Call</button>
+    </div>
+  </div>;
 }
 
 const CSS = `
-*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Inter,system-ui,sans-serif;background:#0b111b;color:#eef4ff}button,input,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit}input,textarea{width:100%;background:#111a29;border:1px solid #2d3b52;color:white;border-radius:10px;padding:12px}textarea{min-height:90px;resize:vertical}label{font-size:12px;font-weight:800;color:#9aa9bf}.app{display:flex;width:100%;height:100%;overflow:hidden;background:#101722}.loading,.auth{height:100%;display:grid;place-items:center;background:radial-gradient(circle at top,#243c66,#0a0f17)}.auth-card{width:min(430px,94vw);padding:32px;background:#151f2e;border:1px solid #30425e;border-radius:22px;box-shadow:0 30px 90px #0008}.logo,.big-logo{width:68px;height:68px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#4d86ff,#263ed0);font-size:36px;font-weight:900}.auth h1{margin:15px 0 5px;font-size:32px}.auth p,.muted{color:#8291a8}.auth form{display:grid;gap:9px;margin-top:22px}.primary,.danger,.controls button,.header button,.composer button{padding:11px 14px;border-radius:10px;background:#4d82ff;color:white;font-weight:800}.danger{background:#b93647}.link{background:transparent;color:#77a1ff;width:100%;margin-top:15px}.error{padding:10px;border-radius:9px;background:#47222b;color:#ffb4bf;font-size:13px}.rail{width:76px;min-width:76px;background:#0a1018;border-right:1px solid #202d40;display:flex;flex-direction:column;align-items:center;gap:9px;padding:10px}.rail-btn{width:52px;height:52px;border-radius:16px;background:#182334;font-weight:900;font-size:18px;display:grid;place-items:center;overflow:hidden}.rail-btn img{width:100%;height:100%;object-fit:cover}.rail-btn.active{background:#315ecf;box-shadow:0 0 0 2px #6e9bff}.rail-btn.add{color:#7da7ff;font-size:27px}.divider{height:1px;width:34px;background:#29384e}.spacer{flex:1}.sidebar{width:270px;min-width:270px;background:#151e2c;border-right:1px solid #26354c;overflow:auto}.side-head{height:72px;padding:14px 16px;border-bottom:1px solid #26354c;display:flex;justify-content:space-between;align-items:center}.side-head small,.side-section{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.2px}.side-head h3{margin:2px 0 0}.side-head button,.side-add{background:transparent;color:#86a9ff;padding:10px}.side-section{padding:15px 13px 6px}.user-row,.channel{width:100%;display:flex;align-items:center;gap:9px;background:transparent;padding:9px 11px;text-align:left;border-radius:8px}.user-row:hover,.channel:hover,.selected{background:#22304a}.user-row span{display:flex;flex-direction:column;min-width:0}.user-row small{color:#78869d}.online{margin-left:auto;width:8px;height:8px;border-radius:50%;background:#45d77b}.server-about{padding:14px;color:#8795aa;font-size:12px}.main{flex:1;min-width:0;display:flex;flex-direction:column;background:#101722}.header{min-height:68px;padding:10px 18px;border-bottom:1px solid #26354c;background:#131c29;display:flex;align-items:center;justify-content:space-between;gap:10px}.header span{color:#75849b;font-size:12px;margin-left:10px}.header-user{display:flex;align-items:center;gap:8px;cursor:pointer}.messages{flex:1;overflow:auto;padding:18px 22px}.message{display:flex;gap:10px;padding:8px 0}.message p{margin:3px 0;color:#d4dcea;overflow-wrap:anywhere}.time{color:#68778e;font-size:10px;margin-left:7px}.composer{display:flex;gap:9px;padding:12px 17px;border-top:1px solid #26354c;background:#131c29}.send{width:50px}.empty{flex:1;display:grid;place-items:center;align-content:center;text-align:center;padding:30px}.empty p{color:#7f8da4}.big-logo{margin:auto}.avatar{width:52px;height:52px;border-radius:15px;object-fit:cover;background:linear-gradient(135deg,#435f98,#23334f);display:grid;place-items:center;font-weight:900}.avatar.small{width:36px;height:36px;border-radius:11px;font-size:12px}.modal-bg{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center;padding:20px}.modal{position:relative;width:min(560px,96vw);max-height:92vh;overflow:auto;background:#151f2e;border:1px solid #30425e;border-radius:18px;padding:25px}.close{position:absolute;right:14px;top:12px;background:#26364e;border-radius:8px;width:34px;height:34px;font-size:22px}.modal form{display:grid;gap:9px}.profile-top{display:flex;align-items:center;gap:14px;margin-bottom:20px}.profile-top h2{margin:0}.profile-top span,.profile-read p{color:#8493a9}.badges{display:flex;gap:6px;flex-wrap:wrap}.staff-badge{padding:4px 7px;border:1px solid #3b5276;background:#22314b;border-radius:8px;font-size:11px;color:#eef4ff}.profile-name-block{min-width:0}.profile-username{color:#8493a9;font-size:13px;margin-top:2px}.profile-staff-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.profile-staff-row .staff-badge{cursor:pointer}.header-user-text{display:flex;flex-direction:column;min-width:0}.header-user-text>span{margin-left:0}.results{margin-top:12px}.result{width:100%;display:flex;gap:10px;align-items:center;background:transparent;padding:9px;text-align:left;border-radius:9px}.result:hover{background:#22304a}.result span{display:flex;flex-direction:column}.result small{color:#7b899e}.toast{position:fixed;right:20px;bottom:20px;z-index:50;background:#22314b;border:1px solid #46618b;padding:12px 16px;border-radius:10px}.voice{flex:1;overflow:auto;padding:28px}.voice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}.video-tile{background:#0b111b;border:1px solid #2b3b54;border-radius:14px;overflow:hidden;padding:8px}.video-tile video{width:100%;aspect-ratio:16/9;object-fit:cover;background:#05080d;border-radius:10px}.video-tile b{display:block;padding:7px}.member-list{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.member-list>div{display:flex;align-items:center;gap:7px;background:#182437;padding:7px 9px;border-radius:9px}.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.controls button{background:#26364e}.call-panel{position:fixed;right:20px;bottom:20px;width:min(340px,90vw);background:#172337;border:1px solid #3d5272;padding:18px;border-radius:14px;z-index:30;display:grid;gap:10px}.call-panel span{color:#8d9ab0;font-size:12px}
-.home-hero{display:flex;align-items:center;gap:18px;width:min(720px,100%);text-align:left;margin-bottom:22px}
-.home-kicker{font-size:10px;font-weight:900;letter-spacing:1.5px;color:#6f86a8;margin-bottom:5px}
-.home-hero h1{margin:0 0 6px;font-size:clamp(25px,4vw,36px)}
-.home-hero p{margin:0;color:#8392a9;line-height:1.5}
-.quick-grid{width:min(720px,100%);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-.quick-card{min-width:0;text-align:left;padding:16px;border:1px solid #2a3a52;background:#151f2e;border-radius:14px;display:grid;gap:7px;transition:transform .15s ease,border-color .15s ease,background .15s ease}
-.quick-card b{font-size:14px}
-.quick-card span{font-size:12px;color:#8291a8;line-height:1.35}
-.home-tip{width:min(720px,100%);margin-top:12px;padding:12px 14px;border:1px solid #2a3a52;background:#111a29;border-radius:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.home-tip span{font-size:10px;font-weight:900;letter-spacing:1px;color:#78a0ff;text-transform:uppercase}
-.home-tip b{font-size:12px;color:#cbd6e7}
-.header-server-banner{width:120px;height:38px;object-fit:cover;border-radius:9px;border:1px solid #31435f}
-.channel-line{display:flex;align-items:center;gap:4px;padding:0 8px 0 0}
-.channel-line .channel{flex:1;min-width:0}
-.channel-actions{display:flex;gap:2px}
-.channel-actions button{width:32px;height:32px;min-width:32px;border-radius:7px;background:transparent}
-.channel-actions button:hover{background:#26364e}
-@media (hover:hover) and (pointer:fine){.quick-card:hover{transform:translateY(-1px);border-color:#3b5378;background:#182437}}
-@media(max-width:800px){.rail{width:60px;min-width:60px}.rail-btn{width:44px;height:44px}.sidebar{width:210px;min-width:210px}}@media(max-width:620px){.sidebar{width:185px;min-width:185px}.messages{padding:14px}.voice{padding:18px}}
+*{box-sizing:border-box}html,body,#root{margin:0;width:100%;height:100%;font-family:Inter,system-ui,sans-serif;background:#0b111b;color:#eef4ff}button,input,textarea{font:inherit}button{cursor:pointer;border:0;color:inherit}input,textarea{width:100%;background:#111a29;border:1px solid #2d3b52;color:white;border-radius:10px;padding:12px}textarea{min-height:90px;resize:vertical}label{font-size:12px;font-weight:800;color:#9aa9bf}.app{display:flex;width:100%;height:100%;overflow:hidden;background:#101722}.loading,.auth{height:100%;display:grid;place-items:center;background:radial-gradient(circle at top,#243c66,#0a0f17)}.auth-card{width:min(430px,94vw);padding:32px;background:#151f2e;border:1px solid #30425e;border-radius:22px;box-shadow:0 30px 90px #0008}.logo,.big-logo{width:68px;height:68px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(135deg,#4d86ff,#263ed0);font-size:36px;font-weight:900}.auth h1{margin:15px 0 5px;font-size:32px}.auth p,.muted{color:#8291a8}.auth form{display:grid;gap:9px;margin-top:22px}.primary,.danger,.controls button,.header button,.composer button{padding:11px 14px;border-radius:10px;background:#4d82ff;color:white;font-weight:800}.danger{background:#b93647}.link{background:transparent;color:#77a1ff;width:100%;margin-top:15px}.error{padding:10px;border-radius:9px;background:#47222b;color:#ffb4bf;font-size:13px}.rail{width:76px;min-width:76px;background:#0a1018;border-right:1px solid #202d40;display:flex;flex-direction:column;align-items:center;gap:9px;padding:10px}.rail-btn{width:52px;height:52px;border-radius:16px;background:#182334;font-weight:900;font-size:18px;display:grid;place-items:center;overflow:hidden}.rail-btn img{width:100%;height:100%;object-fit:cover}.rail-btn.active{background:#315ecf;box-shadow:0 0 0 2px #6e9bff}.rail-btn.add{color:#7da7ff;font-size:27px}.divider{height:1px;width:34px;background:#29384e}.spacer{flex:1}.sidebar{width:270px;min-width:270px;background:#151e2c;border-right:1px solid #26354c;overflow:auto}.side-head{height:72px;padding:14px 16px;border-bottom:1px solid #26354c;display:flex;justify-content:space-between;align-items:center}.side-head small,.side-section{color:#718098;font-size:10px;font-weight:900;letter-spacing:1.2px}.side-head h3{margin:2px 0 0}.side-head button,.side-add{background:transparent;color:#86a9ff;padding:10px}.side-section{padding:15px 13px 6px}.user-row,.channel{width:100%;display:flex;align-items:center;gap:9px;background:transparent;padding:9px 11px;text-align:left;border-radius:8px}.user-row:hover,.channel:hover,.selected{background:#22304a}.user-row span{display:flex;flex-direction:column;min-width:0}.user-row small{color:#78869d}.online{margin-left:auto;width:8px;height:8px;border-radius:50%;background:#45d77b}.server-about{padding:14px;color:#8795aa;font-size:12px}.main{flex:1;min-width:0;display:flex;flex-direction:column;background:#101722}.header{min-height:68px;padding:10px 18px;border-bottom:1px solid #26354c;background:#131c29;display:flex;align-items:center;justify-content:space-between;gap:10px}.header span{color:#75849b;font-size:12px;margin-left:10px}.header-user{display:flex;align-items:center;gap:8px;cursor:pointer}.messages{flex:1;overflow:auto;padding:18px 22px}.message{display:flex;gap:10px;padding:8px 0}.message p{margin:3px 0;color:#d4dcea;overflow-wrap:anywhere}.time{color:#68778e;font-size:10px;margin-left:7px}.composer{display:flex;gap:9px;padding:12px 17px;border-top:1px solid #26354c;background:#131c29}.send{width:50px}.empty{flex:1;display:grid;place-items:center;align-content:center;text-align:center;padding:30px}.empty p{color:#7f8da4}.big-logo{margin:auto}.avatar{width:52px;height:52px;border-radius:15px;object-fit:cover;background:linear-gradient(135deg,#435f98,#23334f);display:grid;place-items:center;font-weight:900}.avatar.small{width:36px;height:36px;border-radius:11px;font-size:12px}.modal-bg{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center;padding:20px}.modal{position:relative;width:min(560px,96vw);max-height:92vh;overflow:auto;background:#151f2e;border:1px solid #30425e;border-radius:18px;padding:25px}.close{position:absolute;right:14px;top:12px;background:#26364e;border-radius:8px;width:34px;height:34px;font-size:22px}.modal form{display:grid;gap:9px}.profile-top{display:flex;align-items:center;gap:14px;margin-bottom:20px}.profile-top h2{margin:0}.profile-top span,.profile-read p{color:#8493a9}.badges{display:flex;gap:6px;flex-wrap:wrap}.staff-badge{padding:4px 7px;border:1px solid #3b5276;background:#22314b;border-radius:8px;font-size:11px;color:#eef4ff}.profile-name-block{min-width:0}.profile-username{color:#8493a9;font-size:13px;margin-top:2px}.profile-staff-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.profile-staff-row .staff-badge{cursor:pointer}.header-user-text{display:flex;flex-direction:column;min-width:0}.header-user-text>span{margin-left:0}.results{margin-top:12px}.result{width:100%;display:flex;gap:10px;align-items:center;background:transparent;padding:9px;text-align:left;border-radius:9px}.result:hover{background:#22304a}.result span{display:flex;flex-direction:column}.result small{color:#7b899e}.toast{position:fixed;right:20px;bottom:20px;z-index:50;background:#22314b;border:1px solid #46618b;padding:12px 16px;border-radius:10px}.voice{flex:1;overflow:auto;padding:28px}.voice-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}.video-tile{background:#0b111b;border:1px solid #2b3b54;border-radius:14px;overflow:hidden;padding:8px}.video-tile video{width:100%;aspect-ratio:16/9;object-fit:cover;background:#05080d;border-radius:10px}.video-tile b{display:block;padding:7px}.member-list{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.member-list>div{display:flex;align-items:center;gap:7px;background:#182437;padding:7px 9px;border-radius:9px}.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.controls button{background:#26364e}.call-panel{position:fixed;right:20px;bottom:20px;width:min(340px,90vw);background:#172337;border:1px solid #3d5272;padding:18px;border-radius:14px;z-index:30;display:grid;gap:10px}.call-panel span{color:#8d9ab0;font-size:12px}.call-participants{display:grid;gap:7px}.call-person{display:flex;align-items:center;gap:9px;background:#1c2a40;border:1px solid #30435f;padding:8px;border-radius:10px}.call-person span{display:flex;flex-direction:column}.call-person small{color:#8292aa;margin-top:2px}.call-incoming{width:min(480px,94vw)}@media(max-width:800px){.rail{width:60px;min-width:60px}.rail-btn{width:44px;height:44px}.sidebar{width:210px;min-width:210px}}@media(max-width:620px){.sidebar{width:185px;min-width:185px}.messages{padding:14px}.voice{padding:18px}}
 
 /* CROSS-PLATFORM / MOBILE SUPPORT */
 .mobile-menu-btn{display:none}
