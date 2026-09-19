@@ -819,6 +819,7 @@ function App() {
   const [miniGame, setMiniGame] = useState(null);
   const [unreadServerChannels, setUnreadServerChannels] = useState({});
 const [unreadDmConversations, setUnreadDmConversations] = useState({});
+const [dmConversationByUser, setDmConversationByUser] = useState({});
 
   const [page, setPage] = useState("home");
   const [serverId, setServerId] = useState(null);
