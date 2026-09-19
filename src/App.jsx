@@ -1511,7 +1511,7 @@ const [dmConversationByUser, setDmConversationByUser] = useState({});
             {selectedServer?.banner_url && <img className="header-server-banner" src={selectedServer.banner_url} alt="" />}
           </header>
           <MessageList messages={messages} profiles={profiles} />
-          <Composer text={text} setText={setText} send={send} disabled={!canSendToChannel(selectedChannel)} placeholder={selectedChannel?.is_locked ? "Channel is locked for your role" : "Write a message..."} />
+         <Composer text={text} setText={setText} send={send} disabled={page === "server" ? !canSendToChannel(selectedChannel) : !dmConversationId} placeholder={page === "server" && selectedChannel?.is_locked ? "Channel is locked for your role" : "Write a message..."} />
 </> : <VexelHomeHub me={me} servers={servers} visibleProfiles={visibleProfiles} onAddPeople={() => setAddOpen(true)} onCreateServer={createServer} onJoinServer={() => { const code = prompt("Enter the server invite code"); if (code) joinServerByCode(code); }} onOpenProfile={() => setProfileOpen(me)} onInstall={() => setInstallOpen(true)} onMiniGames={() => setMiniGame("menu")} />}
       </main>
     }
