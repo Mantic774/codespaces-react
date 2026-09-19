@@ -817,6 +817,8 @@ function App() {
   const [incomingCall, setIncomingCall] = useState(null);
 
   const [miniGame, setMiniGame] = useState(null);
+  const [unreadServerChannels, setUnreadServerChannels] = useState({});
+const [unreadDmConversations, setUnreadDmConversations] = useState({});
 
   const [page, setPage] = useState("home");
   const [serverId, setServerId] = useState(null);
@@ -1033,6 +1035,11 @@ function App() {
 
   async function openChannel(id) {
     setPage("server"); setChannelId(id); setVoiceOpen(false);
+    setUnreadServerChannels(prev => {
+  const next = { ...prev };
+  delete next[id];
+  return next;
+});
     const cached = serverMessagesByChannel[id];
     if (cached) {
       setMessages(cached);
@@ -1064,6 +1071,15 @@ function App() {
       if (memberError) { notify(memberError.message); return; }
     }
     setDmConversationId(conversation);
+    setDmConversationByUser(prev => ({
+  ...prev,
+  [user.id]: conversation
+}));
+    setUnreadDmConversations(prev => {
+  const next = { ...prev };
+  delete next[conversation];
+  return next;
+});
     const cached = dmMessagesByConversation[conversation];
     if (cached) {
       setDmMessages(cached);
@@ -1446,6 +1462,11 @@ function App() {
         <div className="side-section">DIRECT MESSAGES</div>
         {visibleProfiles.map(u => <button className={dmUserId === u.id ? "user-row selected" : "user-row"} key={u.id} onClick={() => openDm(u)}>
           <Avatar user={u} small /><span><b>{u.display_name}</b><small>@{u.username}</small></span><i className={u.status === "Online" ? "online" : ""} />
+          {unreadDmConversations[dmConversationByUser[u.id]] > 0 && (
+  <strong className="unread-badge">
+    {unreadDmConversations[dmConversationByUser[u.id]]}
+  </strong>
+)}
         </button>)}
         {!visibleProfiles.length && <p className="muted">Use ＋ to add/search people.</p>}
       </> : <>
